@@ -1,0 +1,7 @@
+# Caddy 反代：终止 TLS + 代理到 app 容器。
+# DOMAIN 由 docker-compose 传入：
+#   - 不设置            → http://localhost（本地 HTTP）
+#   - 设置为 agent.example.com → 自动申请/续期 Let's Encrypt 证书（需 DNS A 记录指向服务器 + 443 开放）
+{$DOMAIN} {
+	reverse_proxy app:8000
+}

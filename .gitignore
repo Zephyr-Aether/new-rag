@@ -1,0 +1,26 @@
+# 依赖 / 环境
+.venv/
+node_modules/
+agent_platform.egg-info/
+frontend/dist/
+
+# 本地数据库（含开发数据与密钥态）
+*.db
+*.db.bak
+*.db.bak*
+
+# 密钥与本地配置（.env.example 是可提交模板）
+.env
+
+# 缓存
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+
+# 系统
+.DS_Store
+.idea/
+
+# 备份
+backups/

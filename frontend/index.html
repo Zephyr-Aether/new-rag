@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Platform · 控制台</title>
+    <style>
+      /* 启动 splash：React 挂载前展示，避免刷新白屏/闪乱 */
+      #root:empty::after {
+        content: "Agent Platform";
+        position: fixed; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        font: 600 20px/1.4 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+        color: #667085; background: #f6f7f9; letter-spacing: 0.5px;
+        animation: agent-pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes agent-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
