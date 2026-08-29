@@ -360,6 +360,7 @@ class AgentVersionRow(Base):
     system_prompt: Mapped[str] = mapped_column(Text, default="")
     model: Mapped[str] = mapped_column(String(255), default="")
     config_json: Mapped[str] = mapped_column(Text, default="{}")
+    release_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

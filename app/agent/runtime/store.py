@@ -103,12 +103,13 @@ class RunStore(IdempotencyStore):
             rows = await s.scalars(select(AgentRunRow.state).where(AgentRunRow.tenant_id == tenant_id))
         return sum(1 for st in rows if st in active)
 
-    async def list_runs(self, limit: int = 100, offset: int = 0) -> list[dict]:
-        """§18 运行列表（调试 Console；分页 offset/limit）。"""
+    async def list_runs(self, limit: int = 100, offset: int = 0, state: str | None = None) -> list[dict]:
+        """§18 运行列表（调试 Console；分页 offset/limit，可选 state 过滤）。"""
         async with self.sessions() as s:
-            rows = await s.scalars(
-                select(AgentRunRow).order_by(AgentRunRow.started_at.desc()).offset(offset).limit(limit)
-            )
+            q = select(AgentRunRow).order_by(AgentRunRow.started_at.desc())
+            if state:
+                q = q.where(AgentRunRow.state == state)
+            rows = await s.scalars(q.offset(offset).limit(limit))
             return [
                 {
                     "run_id": r.run_id,
@@ -123,6 +124,14 @@ class RunStore(IdempotencyStore):
                 }
                 for r in rows
             ]
+
+    async def count_runs(self, state: str | None = None) -> int:
+        """运行总数（可选 state 过滤），供列表分页计算总页数。"""
+        async with self.sessions() as s:
+            q = select(AgentRunRow.run_id)
+            if state:
+                q = q.where(AgentRunRow.state == state)
+            return len((await s.scalars(q)).all())
 
     async def find_run_by_tool_call(self, call_id: str) -> str | None:
         """由工具调用 id 反查 run（§19 审批批准后定位被阻塞的 run）。"""

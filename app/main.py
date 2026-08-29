@@ -131,6 +131,7 @@ _IDENTITY_ADDITIONS = {
         "upload_sessions": [("tenant_id", "VARCHAR(64) NOT NULL DEFAULT ''")],
         "sessions": [("title", "VARCHAR(255) NOT NULL DEFAULT ''")],
         "messages": [("docs_json", "TEXT NOT NULL DEFAULT '[]'")],
+        "agent_versions": [("release_json", "TEXT NOT NULL DEFAULT '{}'")],
     },
     "postgresql": {
         "users": [
@@ -140,6 +141,7 @@ _IDENTITY_ADDITIONS = {
         "upload_sessions": [("tenant_id", "VARCHAR(64) NOT NULL DEFAULT ''")],
         "sessions": [("title", "VARCHAR(255) NOT NULL DEFAULT ''")],
         "messages": [("docs_json", "TEXT NOT NULL DEFAULT '[]'")],
+        "agent_versions": [("release_json", "TEXT NOT NULL DEFAULT '{}'")],
     },
 }
 

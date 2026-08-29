@@ -1,19 +1,27 @@
 import { useEffect, useState } from 'react'
 import { api, getToken } from '../api'
 
-/** 前端权限感知：拉取当前用户生效权限，can(action) 判断是否可操作（按 action 显隐/禁用按钮）。 */
+/** 前端权限感知：拉取当前用户生效权限与角色，can(action) 判断是否可操作（按 action 显隐/禁用按钮）。 */
 export function usePermissions() {
   const [perms, setPerms] = useState<{ allowed: string[]; denied: string[] }>({ allowed: [], denied: [] })
+  const [roles, setRoles] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
     api
       .authMe()
       .then((r) => {
-        if (!cancelled) setPerms({ allowed: r.allowed ?? [], denied: r.denied ?? [] })
+        if (!cancelled) {
+          setPerms({ allowed: r.allowed ?? [], denied: r.denied ?? [] })
+          setRoles(r.roles ?? [])
+          setLoading(false)
+        }
       })
       .catch(() => {
         /* 未登录等场景忽略，按钮默认可用 */
+        if (!cancelled) setLoading(false)
       })
     return () => {
       cancelled = true
@@ -27,5 +35,5 @@ export function usePermissions() {
     return perms.allowed.includes(action) || perms.allowed.includes('*')
   }
 
-  return { can, perms }
+  return { can, perms, roles, loading }
 }

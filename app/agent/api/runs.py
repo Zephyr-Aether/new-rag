@@ -323,17 +323,19 @@ async def _sediment_memory(state: AppState, subject: Subject, run_id: str) -> No
         pass
 
 
-@router.post("", response_model=RunResult)
 @router.get("")
 async def list_runs(
     request: Request,
+    _: Annotated[Subject, Depends(get_subject)],
+    state: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
-    """JSON run 列表（产品化前端 Runs/Dashboard 用，分页 offset/limit）。"""
-    state: AppState = request.app.state.agent
-    runs = await state.store.list_runs(limit=limit, offset=offset)
-    return {"runs": runs, "total": len(runs)}
+    """JSON run 列表（产品化前端 Runs/Dashboard 用，分页 offset/limit，total 为全量计数）。"""
+    app: AppState = request.app.state.agent
+    runs = await app.store.list_runs(limit=limit, offset=offset, state=state)
+    total = await app.store.count_runs(state=state)
+    return {"runs": runs, "total": total}
 
 
 @router.get("/{run_id}")

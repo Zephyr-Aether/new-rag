@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Component, Suspense, useEffect, useMemo, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Breadcrumb, Layout as AntLayout, Menu } from 'antd'
 import type { MenuProps } from 'antd'
@@ -10,16 +10,57 @@ const { Sider, Header, Content } = AntLayout as unknown as {
   Header: (p: Record<string, unknown> & { children?: ReactNode }) => ReactNode
   Content: (p: Record<string, unknown> & { children?: ReactNode }) => ReactNode
 }
-import { BookOpen, ChevronLeft, LayoutDashboard, MessageSquare, ShieldCheck } from 'lucide-react'
+import { ChevronLeft, Home, LayoutGrid, MessageSquare, ShieldCheck } from 'lucide-react'
 import { api, getToken, HealthHA, ModelConfig } from '../api'
-import { onUnauthorized } from '../http'
-import { Badge, Button, ErrorBox, Field, Loading, Modal } from '../components/ui'
+import { onUnauthorized } from '../request'
+import { Badge, Button, ErrorBox, Field, PageSkeleton, Modal, PasswordInput } from '../components/ui'
+import { PageError } from '../components/Page'
 import { useConfirm } from '../components/Confirm'
 import { usePermissions } from '../hooks/usePermissions'
 import Onboarding, { isOnboardingDone } from '../components/Onboarding'
 import { subscribeToast, ToastItem } from '../toast'
-import { DEMO_LOGIN, fillDemoLogin, getLoginDraft, persistLoginIdentity } from '../lib/productDefaults'
+import { DEMO_LOGIN } from '../constants/product'
+import { fillDemoLogin, getLoginDraft, persistLoginIdentity } from '../util/loginDraft'
 import { History, Sparkles } from 'lucide-react'
+
+const CHUNK_RELOAD_FLAG = '__agent_platform_chunk_reload__'
+
+function isChunkLoadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /Failed to fetch dynamically imported module|Loading chunk [\d]+ failed|Importing a module script failed/i.test(message)
+}
+
+class RouteErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  componentDidCatch(error: Error) {
+    if (!isChunkLoadError(error)) return
+    if (sessionStorage.getItem(CHUNK_RELOAD_FLAG)) return
+    sessionStorage.setItem(CHUNK_RELOAD_FLAG, '1')
+    window.location.reload()
+  }
+
+  render() {
+    if (this.state.error) {
+      const message = isChunkLoadError(this.state.error)
+        ? '页面资源加载失败，可能是版本更新或网络波动。'
+        : this.state.error.message || '页面渲染失败，请重试。'
+
+      return (
+        <PageError
+          message={message}
+          retry={() => window.location.reload()}
+        />
+      )
+    }
+
+    return this.props.children
+  }
+}
 
 type NavItem = {
   key: string
@@ -30,27 +71,19 @@ type NavItem = {
   children?: NavItem[]
 }
 
-// 一级导航收成 5 个主入口：工作台 / 对话 / 知识库 / 评测·发布 / 管理
-// 管理默认折叠且按权限显隐（普通用户只看到主工作流）；低频复杂能力全部收进管理
+// 侧栏按功能分组：首页 + 工作区（主流程）+ 管理（仅管理员可见，默认折叠，不抢第一眼）
 const MENU_ITEMS: NavItem[] = [
-  { key: '/', icon: <LayoutDashboard />, label: '工作台' },
+  { key: '/', icon: <Home />, label: '首页' },
   {
-    key: 'chat-group',
-    icon: <MessageSquare />,
-    label: '对话',
+    key: 'workspace-group',
+    icon: <LayoutGrid />,
+    label: '工作区',
     children: [
+      { key: '/knowledge', label: '知识库' },
       { key: '/chat', label: '对话' },
-      { key: '/runs', label: '运行·任务' },
-    ],
-  },
-  { key: '/knowledge', icon: <BookOpen />, label: '知识库' },
-  {
-    key: 'delivery-group',
-    icon: <Sparkles />,
-    label: '评测·发布',
-    children: [
-      { key: '/evaluation', label: '效果评测' },
-      { key: '/release', label: '版本发布' },
+      { key: '/evaluation', label: '评测' },
+      { key: '/release', label: '发布' },
+      { key: '/runs', label: '任务记录' },
     ],
   },
   {
@@ -75,6 +108,8 @@ const MENU_ITEMS: NavItem[] = [
     ],
   },
 ]
+// 侧栏全量导航：面包屑/展开链/选中态共用
+const ALL_NAV = MENU_ITEMS
 
 /** 路径 → 需要展开的祖先分组 key 链（含嵌套的「知识」子菜单）。 */
 const GROUP_CHAIN_OF_PATH: Record<string, string[]> = {}
@@ -88,7 +123,7 @@ function buildGroupChains(items: NavItem[], ancestors: string[]): void {
     }
   }
 }
-buildGroupChains(MENU_ITEMS, [])
+buildGroupChains(ALL_NAV, [])
 
 /** 按权限裁剪导航：无权限条目不显示；子项全被裁掉的分组整体隐藏。 */
 function filterNavItems(items: NavItem[], can: (a: string) => boolean): NavItem[] {
@@ -137,8 +172,8 @@ function crumbsOf(path: string, onBack?: () => void): { title: ReactNode }[] {
     }
     return null
   }
-  const chain = walk(MENU_ITEMS, [])
-  if (!chain || chain.length === 0) return [...backCrumb, { title: '工作台' }]
+  const chain = walk(ALL_NAV, [])
+  if (!chain || chain.length === 0) return [...backCrumb, { title: '首页' }]
   return chain.map((n, i) => {
     const last = i === chain.length - 1
     return {
@@ -153,7 +188,7 @@ function allKeys(items: NavItem[]): string[] {
 
 /** 把当前 pathname 映射到菜单项 key：详情页（/runs/123 -> /runs）前缀匹配，保证子项/父级都被选中。 */
 function selectedKeyOf(pathname: string): string {
-  const keys = allKeys(MENU_ITEMS)
+  const keys = allKeys(ALL_NAV)
   if (keys.includes(pathname)) return pathname
   const matched = keys
     .filter((k) => k.startsWith('/') && pathname.startsWith(`${k}/`))
@@ -247,12 +282,13 @@ export default function AppLayout() {
 
   const [openKeys, setOpenKeys] = useState<string[]>(() => {
     const chain = GROUP_CHAIN_OF_PATH[selectedKeyOf(location.pathname)] ?? []
-    return chain
+    // 工作区默认展开，管理保持折叠（不抢第一眼）
+    return chain.includes('workspace-group') ? chain : [...chain, 'workspace-group']
   })
   useEffect(() => {
-    // 导航到子菜单时，自动展开全部祖先分组（含嵌套知识子菜单），保证父级标题高亮选中
+    // 导航到子菜单时自动展开祖先分组；工作区常开
     const chain = GROUP_CHAIN_OF_PATH[selectedKeyOf(location.pathname)] ?? []
-    if (chain.length > 0) setOpenKeys((prev) => Array.from(new Set([...prev, ...chain])))
+    setOpenKeys((prev) => Array.from(new Set([...prev, ...chain, 'workspace-group'])))
   }, [location.pathname])
 
   return (
@@ -262,7 +298,7 @@ export default function AppLayout() {
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           <div className="ant-brand">
             <MessageSquare size={18} />
-            <span className={collapsed ? 'hide' : ''}>Agent 工作台</span>
+            <span className={collapsed ? 'hide' : ''}>Agent 发布与治理平台</span>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0 }}>
             <Menu
@@ -337,9 +373,11 @@ export default function AppLayout() {
           </div>
         </Header>
         <Content style={{ padding: 24, overflow: 'auto' }}>
-          <Suspense fallback={<div className="route-loading"><Loading /></div>}>
-            <Outlet />
-          </Suspense>
+          <RouteErrorBoundary key={location.pathname}>
+            <Suspense fallback={<div className="route-loading"><PageSkeleton rows={4} cols={4} /></div>}>
+              <Outlet />
+            </Suspense>
+          </RouteErrorBoundary>
         </Content>
       </AntLayout>
 
@@ -362,7 +400,13 @@ export default function AppLayout() {
             <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="user" />
           </Field>
           <Field label="密码">
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="密码（体验账号 admin123）" onKeyDown={(e) => e.key === 'Enter' && doLogin()} />
+            <PasswordInput
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="密码（体验账号 admin123）"
+              autoComplete="current-password"
+              onKeyDown={(e) => e.key === 'Enter' && doLogin()}
+            />
           </Field>
           <div className="login-actions">
             <Button type="button" onClick={() => {
@@ -398,10 +442,21 @@ export default function AppLayout() {
         <Modal title="首次登录需修改密码" onClose={() => { /* 强制，不可关闭 */ }}>
           <p className="small muted mb">为安全起见，请设置您自己的密码。</p>
           <Field label="新密码（至少 6 位）">
-            <input type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} placeholder="新密码" />
+            <PasswordInput
+              value={newPwd}
+              onChange={(e) => setNewPwd(e.target.value)}
+              placeholder="新密码"
+              autoComplete="new-password"
+            />
           </Field>
           <Field label="确认新密码">
-            <input type="password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} placeholder="再输入一次" onKeyDown={(e) => e.key === 'Enter' && doChangePassword()} />
+            <PasswordInput
+              value={confirmPwd}
+              onChange={(e) => setConfirmPwd(e.target.value)}
+              placeholder="再输入一次"
+              autoComplete="new-password"
+              onKeyDown={(e) => e.key === 'Enter' && doChangePassword()}
+            />
           </Field>
           {pwdErr && <div className="mb"><ErrorBox message={pwdErr} /></div>}
           <Button tone="primary" disabled={pwdBusy} onClick={doChangePassword}>

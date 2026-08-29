@@ -264,6 +264,35 @@ async def test_publish_gate_blocks_config_key_removed(sessions):
     assert any(c["id"] == "config" for c in excinfo.value.detail["failures"])
 
 
+async def test_create_version_splits_release_config(sessions):
+    """灰度参数属于发布态，创建版本时应拆到 release 中。"""
+    svc = _release(sessions)
+    await _seed_agent(sessions, "agSplit")
+    await svc.create_version(
+        tenant_id="t",
+        agent_id="agSplit",
+        system_prompt="p1",
+        config={"a": 1, "gray_percentage": 35},
+    )
+    versions = await svc.list_versions(tenant_id="t", agent_id="agSplit")
+    assert versions[0]["config"] == {"a": 1}
+    assert versions[0]["release"] == {"gray_percentage": 35}
+
+
+async def test_publish_does_not_block_gray_percentage_removed(sessions):
+    """灰度百分比属于发布态，不应算作版本配置漂移。"""
+    svc = _release(sessions)
+    await _seed_agent(sessions, "agGrayCfg")
+    await svc.create_version(tenant_id="t", agent_id="agGrayCfg", system_prompt="p1", config={"a": 1})
+    await svc.publish(tenant_id="t", agent_id="agGrayCfg", version=1)
+    await svc.create_version(tenant_id="t", agent_id="agGrayCfg", system_prompt="p2", config={"a": 1})
+    await svc.gray(tenant_id="t", agent_id="agGrayCfg", version=1, percentage=100)
+    report = await svc.contract_check(tenant_id="t", agent_id="agGrayCfg", version=2)
+    config_check = next(c for c in report["checks"] if c["id"] == "config")
+    assert config_check["status"] == "pass"
+    await svc.publish(tenant_id="t", agent_id="agGrayCfg", version=2)
+
+
 async def test_contract_check_model_unknown(sessions):
     svc = _release(sessions)
     await _seed_agent(sessions, "agM")

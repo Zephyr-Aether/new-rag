@@ -50,7 +50,10 @@ async def _saved_model_config(state: AppState) -> dict:
 
 
 @router.get("/config")
-async def model_config(request: Request) -> dict:
+async def model_config(
+    request: Request,
+    _: Annotated[Subject, Depends(get_subject)],
+) -> dict:
     """当前模型接入配置（不含密钥明文，仅 has_key）。页面配置优先，回落 .env settings。"""
     state: AppState = request.app.state.agent
     s = state.settings

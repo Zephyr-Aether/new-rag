@@ -15,7 +15,7 @@ from app.gateway.auth import create_access_token
 from app.gateway.deps import get_subject
 from app.gateway.passwords import hash_password, verify_password
 from app.state import AppState
-from app.storage.models import UserRow
+from app.storage.models import RoleRow, UserRoleRow, UserRow
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -83,7 +83,15 @@ async def change_password(
 
 @router.get("/me")
 async def me(request: Request, subject: Annotated[Subject, Depends(get_subject)]) -> dict:
-    """当前用户的生效权限（前端据此显隐按钮）。"""
+    """当前用户：生效权限（前端据此显隐按钮）+ 角色名列表（管理员识别）。"""
     state: AppState = request.app.state.agent
     perms = await state.policy.list_actions(subject)
-    return {"user_id": subject.user_id, "tenant_id": subject.tenant_id, **perms}
+    roles: list[str] = []
+    async with state.sessions() as s:
+        rows = await s.execute(
+            select(RoleRow.name)
+            .join(UserRoleRow, UserRoleRow.role_id == RoleRow.id)
+            .where(UserRoleRow.tenant_id == subject.tenant_id, UserRoleRow.user_id == subject.user_id)
+        )
+        roles = [r for (r,) in rows.all()]
+    return {"user_id": subject.user_id, "tenant_id": subject.tenant_id, "roles": sorted(roles), **perms}

@@ -3,7 +3,7 @@
 - create_version：版本只增不改，创建新 DRAFT 行（version 自增）。
 - publish：先过 §58 Release Contract 门禁（fail 阻断），通过后置 ACTIVE。
 - contract_check：§58 发布前 10 项兼容性检查，出报告（fail 阻断 / warn 人工签核）。
-- gray：目标版本置 GRAY，config_json 存 gray_percentage。
+- gray：目标版本置 GRAY，gray_percentage 存 release_json。
 - rollback：切回某版本为 ACTIVE。
 - resolve：按 tenant+agent 解析当前生效版本（灰度命中则返回灰度版）。
 """
@@ -37,6 +37,33 @@ _CONTRACT_CHECK_SPEC: list[tuple[str, str]] = [
     ("trace", "Trace Compatibility"),
     ("rollback", "Rollback Compatibility"),
 ]
+
+_RELEASE_KEYS = {"gray_percentage"}
+
+
+def _split_release_config(cfg: dict | None) -> tuple[dict, dict]:
+    payload = dict(cfg or {})
+    release = {k: payload.pop(k) for k in list(payload.keys()) if k in _RELEASE_KEYS}
+    return payload, release
+
+
+def _load_json(raw: str | None) -> dict:
+    try:
+        return json.loads(raw or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _gray_percentage(row: "AgentVersionRow") -> int:
+    release = _load_json(getattr(row, "release_json", None))
+    if "gray_percentage" in release:
+        return int(release.get("gray_percentage", 0))
+    legacy = _load_json(row.config_json)
+    return int(legacy.get("gray_percentage", 0))
+
+
+def _sanitize_config(cfg: dict) -> dict:
+    return {k: v for k, v in cfg.items() if k not in _RELEASE_KEYS}
 
 
 class ReleaseService:
@@ -86,6 +113,7 @@ class ReleaseService:
                 .limit(1)
             )
             version = (latest or 0) + 1
+            config_json, release_json = _split_release_config(config)
             s.add(
                 AgentVersionRow(
                     id=uuid.uuid4().hex,
@@ -95,7 +123,8 @@ class ReleaseService:
                     status="DRAFT",
                     system_prompt=system_prompt,
                     model=model,
-                    config_json=json.dumps(config or {}, ensure_ascii=False),
+                    config_json=json.dumps(config_json, ensure_ascii=False),
+                    release_json=json.dumps(release_json, ensure_ascii=False),
                 )
             )
             await s.commit()
@@ -120,7 +149,8 @@ class ReleaseService:
                 "status": row.status,
                 "system_prompt": row.system_prompt,
                 "model": row.model,
-                "config": json.loads(row.config_json or "{}"),
+                "config": _sanitize_config(_load_json(row.config_json)),
+                "release": _load_json(getattr(row, "release_json", None)),
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
             for row in rows
@@ -141,7 +171,7 @@ class ReleaseService:
         不阻断；fail = 阻断发布（publish 门禁据此抛 RELEASE_CONTRACT_FAILED）。
         """
         target = await self._get_version(tenant_id, agent_id, version)
-        target_cfg = json.loads(target.config_json or "{}")
+        target_cfg = _sanitize_config(_load_json(target.config_json))
         target_tools = set(target_cfg.get("tools", []))
         # 上一生效版本：ACTIVE/GRAY 的最高版本（跳过目标自身）
         async with self.sessions() as s:
@@ -155,7 +185,7 @@ class ReleaseService:
                 )
                 .order_by(AgentVersionRow.version.desc())
             )
-        prev_cfg = json.loads(prev.config_json or "{}") if prev else {}
+        prev_cfg = _sanitize_config(_load_json(prev.config_json)) if prev else {}
         prev_tools = set(prev_cfg.get("tools", []))
 
         result: dict[str, tuple[str, str]] = {}
@@ -328,12 +358,14 @@ class ReleaseService:
         if not 0 <= percentage <= 100:
             raise AgentError("gray percentage must be 0..100", code="INVALID_GRAY_PERCENTAGE")
         row = await self._get_version(tenant_id, agent_id, version)
-        cfg = json.loads(row.config_json or "{}")
-        cfg["gray_percentage"] = percentage
+        cfg = _sanitize_config(_load_json(row.config_json))
+        release = _load_json(getattr(row, "release_json", None))
+        release["gray_percentage"] = percentage
         async with self.sessions() as s:
             r = await s.get(AgentVersionRow, row.id)
             r.status = "GRAY"
-            r.config_json = json.dumps(cfg)
+            r.config_json = json.dumps(cfg, ensure_ascii=False)
+            r.release_json = json.dumps(release, ensure_ascii=False)
             await s.commit()
         return {"agent_id": agent_id, "version": version, "status": "GRAY", "percentage": percentage}
 
@@ -566,8 +598,7 @@ class ReleaseService:
         if user_id:
             bucket = _stable_hash(user_id) % 100
             for gv in grays:
-                cfg = json.loads(gv.config_json or "{}")
-                if int(cfg.get("gray_percentage", 0)) > bucket:
+                if _gray_percentage(gv) > bucket:
                     return {
                         "version": gv.version,
                         "system_prompt": gv.system_prompt,

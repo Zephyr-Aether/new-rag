@@ -2,6 +2,7 @@ import { lazy } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Layout from './layout/Layout'
 import RequireAuth from './components/RequireAuth'
+import AdminGate from './components/AdminGate'
 import Login from './pages/Login'
 
 // Route-level 分包：每个页面独立 chunk，首屏只加载当前路由（Phase 4）
@@ -37,20 +38,20 @@ export default function App() {
         <Route path="/chat" element={<Chat />} />
         <Route path="/release" element={<Release />} />
         <Route path="/knowledge" element={<Knowledge />} />
-        <Route path="/memory" element={<Memory />} />
-        <Route path="/graph" element={<Graph />} />
+        <Route path="/memory" element={<AdminGate><Memory /></AdminGate>} />
+        <Route path="/graph" element={<AdminGate><Graph /></AdminGate>} />
         <Route path="/evaluation" element={<Evaluation />} />
-        <Route path="/cost" element={<Cost />} />
-        <Route path="/model" element={<ModelHealth />} />
-        <Route path="/tools" element={<Tools />} />
-        <Route path="/events" element={<Events />} />
-        <Route path="/queue" element={<Queue />} />
-        <Route path="/approvals" element={<Approvals />} />
-        <Route path="/audit" element={<Audit />} />
-        <Route path="/data" element={<Data />} />
-        <Route path="/settings" element={<ConfigCenter />} />
-        <Route path="/policies" element={<Policies />} />
-        <Route path="/users" element={<Users />} />
+        <Route path="/cost" element={<AdminGate><Cost /></AdminGate>} />
+        <Route path="/model" element={<AdminGate><ModelHealth /></AdminGate>} />
+        <Route path="/tools" element={<AdminGate><Tools /></AdminGate>} />
+        <Route path="/events" element={<AdminGate><Events /></AdminGate>} />
+        <Route path="/queue" element={<AdminGate><Queue /></AdminGate>} />
+        <Route path="/approvals" element={<AdminGate><Approvals /></AdminGate>} />
+        <Route path="/audit" element={<AdminGate><Audit /></AdminGate>} />
+        <Route path="/data" element={<AdminGate><Data /></AdminGate>} />
+        <Route path="/settings" element={<AdminGate><ConfigCenter /></AdminGate>} />
+        <Route path="/policies" element={<AdminGate><Policies /></AdminGate>} />
+        <Route path="/users" element={<AdminGate><Users /></AdminGate>} />
       </Route>
     </Routes>
   )

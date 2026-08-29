@@ -1,5 +1,5 @@
-// 类型化 API 客户端：覆盖全部后端模块（底层走 axios 拦截器，见 http.ts）
-import { http, getToken, setToken, clearToken } from './http'
+// 类型化 API 客户端：覆盖全部后端模块（底层走 axios 拦截器，见 request.ts）
+import { getToken, handleUnauthorized, http, setToken, clearToken } from './request'
 
 export { getToken, setToken, clearToken }
 
@@ -128,6 +128,7 @@ export interface Version {
   system_prompt: string
   model: string
   config: Record<string, unknown>
+  release?: Record<string, unknown>
   created_at?: string
 }
 
@@ -469,7 +470,7 @@ const api = {
     return r
   },
   logout: () => clearToken(),
-  authMe: () => get<{ user_id: string; tenant_id: string; allowed: string[]; denied: string[] }>('/auth/me'),
+  authMe: () => get<{ user_id: string; tenant_id: string; roles: string[]; allowed: string[]; denied: string[] }>('/auth/me'),
   changePassword: async (oldRaw: string, newRaw: string) => {
     const r = await post<{ ok: boolean }>('/auth/password', {
       old_password: oldRaw ? await sha256Hex(oldRaw) : '',
@@ -512,8 +513,8 @@ const api = {
   health: () => get<HealthHA>('/health/ha'),
   meta: () => get<Meta>('/meta'),
   // Runs
-  listRuns: (limit = 50, offset = 0) =>
-    get<{ runs: Run[]; total: number }>(`/agents/runs?limit=${limit}&offset=${offset}`),
+  listRuns: (limit = 50, offset = 0, state = '') =>
+    get<{ runs: Run[]; total: number }>(`/agents/runs?limit=${limit}&offset=${offset}${state ? `&state=${encodeURIComponent(state)}` : ''}`),
   createRun: (input: string, awaitResult = true, opts: { sessionId?: string; history?: { role: string; content: string }[] } = {}) =>
     post<Run>('/agents/runs', {
       input,
@@ -534,7 +535,11 @@ const api = {
       body: JSON.stringify({ input, session_id: opts.sessionId, history: opts.history }),
       signal,
     })
-    if (!res.ok || !res.body) throw new Error(`流式接口失败: ${res.status}`)
+    if (!res.ok || !res.body) {
+      // 流式走原生 fetch，绕过 axios 拦截器：401 也要触发统一的「登录失效」处理
+      if (res.status === 401) handleUnauthorized()
+      throw new Error(`流式接口失败: ${res.status}`)
+    }
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
