@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, CanaryCheck, ContractCheck, Meta, Regression, ReleaseMetrics, Version } from '@/api'
-import { Badge, Bar, Button, Card, ErrorBox, fmtCost, fmtTime, Loading, SuccessBox, TableSkeleton } from '@/components/ui'
+import { api, CanaryCheck, ContractCheck, Meta, Regression, ReleaseMetrics, Version } from '@/services'
+import { Badge, Bar, Button, Card, fmtCost, fmtTime, Loading, TableSkeleton } from '@/components'
 import { EmptyState, FlowChain, PageError } from '@/components/Page'
 import ReleaseFlow from './components/ReleaseFlow'
 import GrayModal from './components/GrayModal'
@@ -29,7 +29,6 @@ export default function Release() {
   const [metrics, setMetrics] = useState<ReleaseMetrics[] | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
-  const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
 
   // 弹窗
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -61,12 +60,10 @@ export default function Release() {
     try {
       await fn()
       toast(ok)
-      setNotice({ kind: 'success', text: ok })
       await refresh()
     } catch (e) {
       const message = (e as Error).message
       toast(message, 'err')
-      setNotice({ kind: 'error', text: message })
     } finally {
       setBusy('')
     }
@@ -81,11 +78,9 @@ export default function Release() {
     try {
       const data = await api.contractCheck(agentId, v)
       setContractFor({ version: v, data })
-      setNotice({ kind: 'success', text: `v${v} 契约检查已完成，结果已打开。` })
     } catch (e) {
       const message = (e as Error).message
       toast(message, 'err')
-      setNotice({ kind: 'error', text: message })
     } finally {
       setBusy('')
     }
@@ -97,11 +92,9 @@ export default function Release() {
       const r = await api.securityEval(agentId, v)
       const message = `v${v} 安全评测：${r.passed}/${r.total} 未被利用（pass_rate ${r.pass_rate.toFixed(2)}）`
       toast(message)
-      setNotice({ kind: 'success', text: message })
     } catch (e) {
       const message = (e as Error).message
       toast(message, 'err')
-      setNotice({ kind: 'error', text: message })
     } finally {
       setBusy('')
     }
@@ -112,11 +105,9 @@ export default function Release() {
     try {
       const data = await api.regression(agentId, v) // §20 基准集回归报告（pass_rate vs 上一版本）
       setRegFor({ version: v, data })
-      setNotice({ kind: 'success', text: `v${v} 回归报告已生成，结果已打开。` })
     } catch (e) {
       const message = (e as Error).message
       toast(message, 'err')
-      setNotice({ kind: 'error', text: message })
     } finally {
       setBusy('')
     }
@@ -127,11 +118,9 @@ export default function Release() {
     try {
       const data = await api.canaryEvaluate(agentId)  // §57 对当前 GRAY 版本做 canary 检查
       setCanaryFor({ version: v, data })
-      setNotice({ kind: 'success', text: `v${v} Canary 检查已完成，结果已打开。` })
     } catch (e) {
       const message = (e as Error).message
       toast(message, 'err')
-      setNotice({ kind: 'error', text: message })
     } finally {
       setBusy('')
     }
@@ -144,7 +133,7 @@ export default function Release() {
   if (!meta) return err ? <PageError message={err} retry={() => refresh().catch((e: Error) => setErr(e.message))} /> : <Loading />
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid" style={{ gap: 16 }}>
       {confirmEl}
       {err && <PageError message={err} retry={() => refresh().catch((e: Error) => setErr(e.message))} />}
 
@@ -154,11 +143,6 @@ export default function Release() {
         desc="按「创建草稿 → 契约检查 → 回归评测 → 灰度放量 → 全量上线/回滚」的主线走，当前只做最该做的一步。"
       />
 
-      {notice && (
-        <div className="mb">
-          {notice.kind === 'success' ? <SuccessBox message={notice.text} /> : <ErrorBox message={notice.text} />}
-        </div>
-      )}
 
       {orderedVersions !== null && (
         <ReleaseFlow

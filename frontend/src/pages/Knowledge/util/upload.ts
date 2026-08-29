@@ -1,4 +1,4 @@
-import { api } from '@/api'
+import { api } from '@/services'
 
 export const CHUNK_SIZE = 1024 * 1024 // 1MB 分片
 

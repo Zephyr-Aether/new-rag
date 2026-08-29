@@ -45,7 +45,8 @@ class UserRow(Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)  # §27 pbkdf2(sha256(pwd))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # 禁用后拒绝签发 token
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)  # 首次登录/重置后强制改密
-    isDelete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # 软删除：1=已删除，删除写改此字段
+    # 软删除：1=已删除，删除写改此字段
+    isDelete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -570,6 +571,23 @@ class RegressionRunRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ReleaseFlowHistoryRow(Base):
+    """发布流程执行历史（留痕）：发布页每步一次执行记录，供复盘。"""
+
+    __tablename__ = "release_flow_history"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    agent_id: Mapped[str] = mapped_column(String(64), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    step: Mapped[str] = mapped_column(String(32))  # draft/contract/regression/gray/release
+    operator: Mapped[str] = mapped_column(String(64), default="")
+    summary: Mapped[str] = mapped_column(String(255), default="")
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class TracePayloadRow(Base):
     """Trace payload 采样（§17.3）：属性全量、payload 按采样率存储（默认 10%）。"""
 
@@ -595,4 +613,33 @@ class EventRow(Base):
     aggregate_id: Mapped[str] = mapped_column(String(64), default="")  # 关联对象（run_id 等）
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
     dedupe_key: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True)  # 幂等
+    dedupe_hits: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # 幂等命中次数
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EventReplayRow(Base):
+    """事件重放日志（§28.2）：每次重放记一条，用于成功率统计。"""
+
+    __tablename__ = "event_replays"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    aggregate_id: Mapped[str] = mapped_column(String(64), index=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    events_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReleaseFlowNodeRow(Base):
+    """发布流节点配置（§21.4）：5 个节点（code/name）+ 每节点 config（前端回显用）。"""
+
+    __tablename__ = "release_flow_nodes"
+    __table_args__ = (UniqueConstraint("tenant_id", "agent_id", "node_code", name="uq_flow_node"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    agent_id: Mapped[str] = mapped_column(String(64), index=True)
+    node_code: Mapped[str] = mapped_column(String(32))
+    node_name: Mapped[str] = mapped_column(String(64), default="")
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

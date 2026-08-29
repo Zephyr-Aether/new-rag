@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Graph } from '@antv/g6'
-import { api } from '@/api'
-import { Badge, Button, Card, ErrorBox, Field, SuccessBox } from '@/components/ui'
+import { api } from '@/services'
+import { Badge, Button, Card, ErrorBox, Field } from '@/components'
 import { EmptyState, PageHeader } from '@/components/Page'
+import { toast } from '@/toast'
 
 interface Fact {
   subject: string
@@ -84,7 +85,6 @@ export default function GraphPage() {
   const [entity, setEntity] = useState('')
   const [entityFacts, setEntityFacts] = useState<{ entity: string; canonical: string | null; facts: Fact[] } | null>(null)
   const [err, setErr] = useState('')
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [subj, setSubj] = useState('')
   const [pred, setPred] = useState('')
@@ -131,15 +131,14 @@ export default function GraphPage() {
   async function addFact() {
     if (!subj || !pred || !obj) return
     setBusy(true)
-    setMsg(null)
     try {
       await api.addGraphFact({ subject: subj.trim(), predicate: pred.trim(), object: obj.trim() })
-      setMsg({ kind: 'ok', text: '事实已写入' })
+      toast('事实已写入')
       setSubj('')
       setPred('')
       setObj('')
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy(false)
     }
@@ -148,16 +147,15 @@ export default function GraphPage() {
   async function extract() {
     if (!extractText.trim()) return
     setBusy(true)
-    setMsg(null)
     try {
       const r = await api.graphExtract({
         document_id: extractDoc.trim() || `doc-${Date.now().toString(36)}`,
         text: extractText.trim(),
       })
-      setMsg({ kind: 'ok', text: `抽取完成：新增 ${r.added} 条事实` })
+      toast(`抽取完成：新增 ${r.added} 条事实`)
       setExtractText('')
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy(false)
     }
@@ -166,14 +164,13 @@ export default function GraphPage() {
   async function merge() {
     if (!mergeFrom.trim() || !mergeInto.trim()) return
     setBusy(true)
-    setMsg(null)
     try {
       await api.graphMerge(mergeFrom.trim(), mergeInto.trim())
-      setMsg({ kind: 'ok', text: `已把「${mergeFrom}」合并进「${mergeInto}」` })
+      toast(`已把「${mergeFrom}」合并进「${mergeInto}」`)
       setMergeFrom('')
       setMergeInto('')
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy(false)
     }
@@ -315,7 +312,7 @@ export default function GraphPage() {
             <input value={obj} onChange={(e) => setObj(e.target.value)} placeholder="退款流程" />
           </Field>
           <Button tone="primary" disabled={busy || !subj || !pred || !obj} onClick={addFact} className="mt">写入</Button>
-          {msg && <div className="mt">{msg.kind === 'ok' ? <SuccessBox message={msg.text} /> : <ErrorBox message={msg.text} />}</div>}
+          
         </Card>
 
         <Card title="从文档抽取事实（LLM/规则）" className="mt">

@@ -1,6 +1,6 @@
-import { Badge, Button, Modal } from '@/components/ui'
+import { Badge, Button, Modal } from '@/components'
 import { EmptyState } from '@/components/Page'
-import { Regression } from '@/api'
+import { Regression } from '@/services'
 
 export default function RegressionModal({ version, data, onClose }: { version: number; data: Regression; onClose: () => void }) {
   const rate = (data.pass_rate ?? 0) * 100

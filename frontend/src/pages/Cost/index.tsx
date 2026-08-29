@@ -1,9 +1,12 @@
 import { useState } from 'react'
+import { Pagination } from '@/components/pagination'
 import { useRequest } from 'ahooks'
 import { useNavigate } from 'react-router-dom'
-import { api } from '@/api'
-import { Badge, Bar, Button, Card, ErrorBox, fmtCost, shortId, SuccessBox, TableSkeleton } from '@/components/ui'
+import { api } from '@/services'
+import { Badge, Bar, Button, Card, ErrorBox, fmtCost, shortId, SuccessBox, TableSkeleton } from '@/components'
 import { EmptyState, PageError, PageHeader } from '@/components/Page'
+
+const PAGE_SIZE = 10
 
 export default function Cost() {
   const navigate = useNavigate()
@@ -14,6 +17,7 @@ export default function Cost() {
   const growth = data?.[1].rows ?? null
   const [reconcileMsg, setReconcileMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [page, setPage] = useState(1)
 
   async function reconcile() {
     setBusy(true)
@@ -56,7 +60,7 @@ export default function Cost() {
           </Button>
         }
       />
-      <div className="grid" style={{ gap: 18 }}>
+      <div className="grid" style={{ gap: 16 }}>
       {error && <PageError message={(error as Error).message} retry={() => refresh()} />}
       {reconcileMsg && (reconcileMsg.kind === 'ok' ? <SuccessBox message={reconcileMsg.text} /> : <ErrorBox message={reconcileMsg.text} />)}
 
@@ -121,7 +125,7 @@ export default function Cost() {
                 </tr>
               </thead>
               <tbody>
-                {(rows ?? []).map((r, i) => {
+                {(rows ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r, i) => {
                   const max = Math.max(...(rows ?? []).map((x) => x.cost), 0.0001)
                   return (
                     <tr key={i}>
@@ -141,6 +145,11 @@ export default function Cost() {
                 })}
               </tbody>
             </table>
+          )}
+          {(rows?.length ?? 0) > PAGE_SIZE && (
+            <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+              <Pagination current={page} pageSize={PAGE_SIZE} total={rows?.length ?? 0} onChange={setPage} />
+            </div>
           )}
         </Card>
 

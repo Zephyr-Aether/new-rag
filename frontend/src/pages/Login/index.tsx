@@ -1,9 +1,9 @@
 import { FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '@/api'
-import { DEMO_LOGIN } from '@/constants/product'
-import { fillDemoLogin, getLoginDraft, persistLoginIdentity } from '@/util/loginDraft'
-import { Button, Card, ErrorBox, Field, PasswordInput } from '@/components/ui'
+import { api } from '@/services'
+import { DEMO_LOGIN } from '@/constants'
+import { fillDemoLogin, getLoginDraft, persistLoginIdentity } from '@/util'
+import { Button, Card, ErrorBox, Field, PasswordInput } from '@/components'
 import { History, Sparkles } from 'lucide-react'
 
 export default function Login() {

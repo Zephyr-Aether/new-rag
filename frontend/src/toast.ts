@@ -1,33 +1,14 @@
-// 全局 toast（轻量发布-订阅；Layout 订阅渲染）
+// 全局操作提示：基于 shadcn 的 sonner Toast（替代自研 pub-sub 渲染）
+import { toast as sonnerToast } from 'sonner'
+
 type ToastKind = 'ok' | 'err'
-export interface ToastItem {
-  id: number
-  kind: ToastKind
-  text: string
-}
-type Listener = (toasts: ToastItem[]) => void
-
-let toasts: ToastItem[] = []
-let listeners = new Set<Listener>()
-let seq = 0
-
-function emit() {
-  listeners.forEach((l) => l([...toasts]))
-}
 
 export function toast(text: string, kind: ToastKind = 'ok', ttlMs = 3500): void {
-  const id = ++seq
-  toasts = [...toasts, { id, kind, text }]
-  emit()
-  setTimeout(() => {
-    toasts = toasts.filter((t) => t.id !== id)
-    emit()
-  }, ttlMs)
+  if (kind === 'err') sonnerToast.error(text, { duration: ttlMs })
+  else sonnerToast.success(text, { duration: ttlMs })
 }
 
-export function subscribeToast(fn: Listener): () => void {
-  listeners.add(fn)
-  return () => {
-    listeners.delete(fn)
-  }
+/** 兼容旧签名（供需要订阅的地方使用；布局不再自渲染，直接由 <Toaster/> 呈现）。 */
+export function subscribeToast(_fn: () => void): () => void {
+  return () => undefined
 }

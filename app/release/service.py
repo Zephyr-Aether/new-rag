@@ -17,7 +17,14 @@ from sqlalchemy import func, select, text
 
 from app.common.errors import AgentError
 from app.queue.schema import migrate_agent_run_payload
-from app.storage.models import AgentRow, AgentVersionRow, EventRow, ToolCallRow
+from app.storage.models import (
+    AgentRow,
+    AgentVersionRow,
+    EventRow,
+    ReleaseFlowHistoryRow,
+    ReleaseFlowNodeRow,
+    ToolCallRow,
+)
 
 
 def _stable_hash(user_id: str) -> int:
@@ -39,6 +46,15 @@ _CONTRACT_CHECK_SPEC: list[tuple[str, str]] = [
 ]
 
 _RELEASE_KEYS = {"gray_percentage"}
+
+# 发布流 5 个节点（code + name）；前端按下发配置渲染，当前阶段用 status 标识
+FLOW_NODES: list[tuple[str, str]] = [
+    ("draft", "创建草稿"),
+    ("contract", "契约检查"),
+    ("regression", "回归评测"),
+    ("gray", "灰度放量"),
+    ("release", "全量上线/回滚"),
+]
 
 
 def _split_release_config(cfg: dict | None) -> tuple[dict, dict]:
@@ -72,6 +88,19 @@ class ReleaseService:
         self.registry = registry
         self.settings = settings
 
+    async def _ensure_not_terminated(self, *, tenant_id: str, agent_id: str) -> None:
+        """发布流已终止时拒绝继续操作。"""
+        async with self.sessions() as s:
+            row = await s.scalar(
+                select(ReleaseFlowNodeRow).where(
+                    ReleaseFlowNodeRow.tenant_id == tenant_id,
+                    ReleaseFlowNodeRow.agent_id == agent_id,
+                    ReleaseFlowNodeRow.node_code == "_meta",
+                )
+            )
+        if row is not None and _load_json(row.config_json).get("terminated"):
+            raise AgentError("发布流已终止，无法继续操作", code="RELEASE_FLOW_TERMINATED")
+
     async def _get_version(self, tenant_id: str, agent_id: str, version: int) -> AgentVersionRow:
         async with self.sessions() as s:
             row = await s.scalar(
@@ -96,6 +125,7 @@ class ReleaseService:
         model: str = "",
         config: dict | None = None,
     ) -> dict:
+        await self._ensure_not_terminated(tenant_id=tenant_id, agent_id=agent_id)
         """§22 版本只增不改：创建新 DRAFT 版本（version 自增，配置走新行）。"""
         async with self.sessions() as s:
             agent = await s.scalar(
@@ -165,6 +195,7 @@ class ReleaseService:
         min_runs: int = 10,
         error_threshold: float = 0.2,
     ) -> dict:
+        await self._ensure_not_terminated(tenant_id=tenant_id, agent_id=agent_id)
         """§58 发布前 10 项兼容性检查，出报告。
 
         每条 pass / warn / fail：warn = 平台级或需人工签核（CI + 人工 checklist 双保险），
@@ -318,6 +349,7 @@ class ReleaseService:
         enforce_contract: bool = True,
         force: bool = False,
     ) -> dict:
+        await self._ensure_not_terminated(tenant_id=tenant_id, agent_id=agent_id)
         """发布为 ACTIVE：先过 §58 Release Contract 门禁（fail 阻断），其余 ACTIVE 降为 DISABLED。"""
         if enforce_contract and not force:
             report = await self.contract_check(tenant_id=tenant_id, agent_id=agent_id, version=version)
@@ -355,6 +387,8 @@ class ReleaseService:
         return {"agent_id": agent_id, "version": version, "status": "ACTIVE"}
 
     async def gray(self, *, tenant_id: str, agent_id: str, version: int, percentage: int) -> dict:
+        await self._ensure_not_terminated(tenant_id=tenant_id, agent_id=agent_id)
+
         if not 0 <= percentage <= 100:
             raise AgentError("gray percentage must be 0..100", code="INVALID_GRAY_PERCENTAGE")
         row = await self._get_version(tenant_id, agent_id, version)
@@ -370,6 +404,7 @@ class ReleaseService:
         return {"agent_id": agent_id, "version": version, "status": "GRAY", "percentage": percentage}
 
     async def rollback(self, *, tenant_id: str, agent_id: str, to_version: int | None = None) -> dict:
+        await self._ensure_not_terminated(tenant_id=tenant_id, agent_id=agent_id)
         """回滚到指定版本（缺省回滚到上一 ACTIVE 版本）。"""
         async with self.sessions() as s:
             current = await s.scalar(
@@ -398,6 +433,7 @@ class ReleaseService:
         return {"agent_id": agent_id, "version": target, "status": "ACTIVE"}
 
     async def halt(self, *, tenant_id: str, agent_id: str, version: int) -> dict:
+        await self._ensure_not_terminated(tenant_id=tenant_id, agent_id=agent_id)
         """§57 Canary 自动停：把灰度版本 DISABLED（新流量回落 ACTIVE）。"""
         async with self.sessions() as s:
             row = await s.scalar(
@@ -613,3 +649,234 @@ class ReleaseService:
             "model": active.model,
             "status": "ACTIVE",
         }
+
+    async def add_flow_history(
+        self,
+        *,
+        tenant_id: str,
+        agent_id: str,
+        version: int,
+        step: str,
+        operator: str,
+        summary: str,
+        ok: bool,
+        detail: str | None = None,
+    ) -> dict:
+        """发布流程执行历史（留痕）：记录一步的创建/契约/回归/灰度/上线。"""
+        async with self.sessions() as s:
+            s.add(
+                ReleaseFlowHistoryRow(
+                    id=uuid.uuid4().hex,
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    version=version,
+                    step=step,
+                    operator=operator,
+                    summary=summary[:255],
+                    ok=ok,
+                    detail=detail,
+                )
+            )
+            await s.commit()
+        return {"ok": True}
+
+    async def list_flow_history(
+        self,
+        *,
+        tenant_id: str,
+        agent_id: str,
+        step: str | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        """列出发布流程执行历史（时间倒序），可选按 step 过滤。"""
+        async with self.sessions() as s:
+            q = select(ReleaseFlowHistoryRow).where(
+                ReleaseFlowHistoryRow.tenant_id == tenant_id,
+                ReleaseFlowHistoryRow.agent_id == agent_id,
+            )
+            if step:
+                q = q.where(ReleaseFlowHistoryRow.step == step)
+            rows = (await s.scalars(q.order_by(ReleaseFlowHistoryRow.created_at.desc()).limit(limit))).all()
+            return [
+                {
+                    "id": r.id,
+                    "version": r.version,
+                    "step": r.step,
+                    "operator": r.operator,
+                    "summary": r.summary,
+                    "ok": r.ok,
+                    "detail": r.detail,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+
+    async def _ensure_flow_nodes(self, *, tenant_id: str, agent_id: str) -> None:
+        """幂等播种 5 个节点 + meta 行（含当前阶段/终止标识）。"""
+        async with self.sessions() as s:
+            existing = await s.scalar(
+                select(ReleaseFlowNodeRow.id).where(
+                    ReleaseFlowNodeRow.tenant_id == tenant_id, ReleaseFlowNodeRow.agent_id == agent_id
+                ).limit(1)
+            )
+            if existing is not None:
+                return
+            for code, name in FLOW_NODES:
+                s.add(
+                    ReleaseFlowNodeRow(
+                        id=uuid.uuid4().hex, tenant_id=tenant_id, agent_id=agent_id,
+                        node_code=code, node_name=name, config_json="{}",
+                    )
+                )
+            s.add(
+                ReleaseFlowNodeRow(
+                    id=uuid.uuid4().hex, tenant_id=tenant_id, agent_id=agent_id,
+                    node_code="_meta", node_name="meta",
+                    config_json=json.dumps({"status": "", "terminated": False}),
+                )
+            )
+            await s.commit()
+
+    async def get_flow_config(self, *, tenant_id: str, agent_id: str) -> dict:
+        """发布流配置：5 节点（code/name/config）+ 当前阶段 status + 是否终止。"""
+        await self._ensure_flow_nodes(tenant_id=tenant_id, agent_id=agent_id)
+        async with self.sessions() as s:
+            rows = (
+                await s.scalars(
+                    select(ReleaseFlowNodeRow).where(
+                        ReleaseFlowNodeRow.tenant_id == tenant_id, ReleaseFlowNodeRow.agent_id == agent_id
+                    )
+                )
+            ).all()
+            version = await s.scalar(
+                select(AgentVersionRow).where(
+                    AgentVersionRow.tenant_id == tenant_id, AgentVersionRow.agent_id == agent_id
+                ).order_by(AgentVersionRow.version.desc()).limit(1)
+            )
+        meta: dict = {}
+        nodes: list[dict] = []
+        for r in rows:
+            cfg = _load_json(r.config_json)
+            if r.node_code == "_meta":
+                meta = cfg
+            else:
+                nodes.append({"code": r.node_code, "name": r.node_name, "config": cfg})
+        derived = "empty" if version is None else {
+            "DRAFT": "draft", "GRAY": "gray", "ACTIVE": "done", "DISABLED": "disabled",
+        }.get(version.status, "empty")
+        status = meta.get("status") or derived
+        terminated = bool(meta.get("terminated"))
+        if terminated:
+            status = "terminated"
+        # 当前步骤 + 每节点状态（按 flow status 推导，前端据此渲染）
+        step_map = {"empty": 0, "draft": 1, "contract": 1, "regression": 2, "gray": 3,
+                     "release": 4, "done": 4, "disabled": 4}
+        current_step = step_map.get(status, 0)
+        for idx, n in enumerate(nodes):
+            if terminated:
+                n["status"] = "wait"
+            elif status == "done":
+                n["status"] = "finish"
+            elif idx < current_step:
+                n["status"] = "finish"
+            elif idx == current_step:
+                n["status"] = "process"
+            else:
+                n["status"] = "wait"
+        return {
+            "agent_id": agent_id,
+            "status": status,
+            "terminated": terminated,
+            "current_step": current_step,
+            "nodes": nodes,
+        }
+
+    async def save_node_config(self, *, tenant_id: str, agent_id: str, node_code: str, config: dict) -> dict:
+        """保存某节点的 config（前端回显用）。"""
+        async with self.sessions() as s:
+            row = await s.scalar(
+                select(ReleaseFlowNodeRow).where(
+                    ReleaseFlowNodeRow.tenant_id == tenant_id,
+                    ReleaseFlowNodeRow.agent_id == agent_id,
+                    ReleaseFlowNodeRow.node_code == node_code,
+                )
+            )
+            if row is None:
+                row = ReleaseFlowNodeRow(
+                    id=uuid.uuid4().hex, tenant_id=tenant_id, agent_id=agent_id, node_code=node_code
+                )
+                s.add(row)
+            row.config_json = json.dumps(config or {}, ensure_ascii=False)
+            row.updated_at = datetime.now(UTC)
+            await s.commit()
+        return {"ok": True, "node_code": node_code}
+
+    async def save_flow_status(self, *, tenant_id: str, agent_id: str, status: str) -> dict:
+        """更新发布流当前阶段标识。"""
+        async with self.sessions() as s:
+            row = await s.scalar(
+                select(ReleaseFlowNodeRow).where(
+                    ReleaseFlowNodeRow.tenant_id == tenant_id,
+                    ReleaseFlowNodeRow.agent_id == agent_id,
+                    ReleaseFlowNodeRow.node_code == "_meta",
+                )
+            )
+            if row is None:
+                row = ReleaseFlowNodeRow(
+                    id=uuid.uuid4().hex, tenant_id=tenant_id, agent_id=agent_id,
+                    node_code="_meta", config_json="{}",
+                )
+                s.add(row)
+            cfg = _load_json(row.config_json)
+            cfg["status"] = status
+            if status != "terminated":
+                cfg["terminated"] = False
+            row.config_json = json.dumps(cfg, ensure_ascii=False)
+            row.updated_at = datetime.now(UTC)
+            await s.commit()
+        return {"ok": True, "status": status}
+
+    async def terminate_flow(self, *, tenant_id: str, agent_id: str) -> dict:
+        """随时终止发布流：标记 terminated，前端据此冻结操作。"""
+        async with self.sessions() as s:
+            row = await s.scalar(
+                select(ReleaseFlowNodeRow).where(
+                    ReleaseFlowNodeRow.tenant_id == tenant_id,
+                    ReleaseFlowNodeRow.agent_id == agent_id,
+                    ReleaseFlowNodeRow.node_code == "_meta",
+                )
+            )
+            if row is None:
+                row = ReleaseFlowNodeRow(
+                    id=uuid.uuid4().hex, tenant_id=tenant_id, agent_id=agent_id,
+                    node_code="_meta", config_json="{}",
+                )
+                s.add(row)
+            cfg = _load_json(row.config_json)
+            cfg["status"] = "terminated"
+            cfg["terminated"] = True
+            cfg["terminated_at"] = datetime.now(UTC).isoformat()
+            row.config_json = json.dumps(cfg, ensure_ascii=False)
+            row.updated_at = datetime.now(UTC)
+            await s.commit()
+        return {"ok": True, "terminated": True}
+
+    async def start_flow(self, *, tenant_id: str, agent_id: str) -> dict:
+        """开启新的发布流：清空各节点 config，重置阶段为 empty、解除终止。"""
+        await self._ensure_flow_nodes(tenant_id=tenant_id, agent_id=agent_id)
+        async with self.sessions() as s:
+            rows = (
+                await s.scalars(
+                    select(ReleaseFlowNodeRow).where(
+                        ReleaseFlowNodeRow.tenant_id == tenant_id, ReleaseFlowNodeRow.agent_id == agent_id
+                    )
+                )
+            ).all()
+            for r in rows:
+                if r.node_code == "_meta":
+                    r.config_json = json.dumps({"status": "empty", "terminated": False})
+                else:
+                    r.config_json = "{}"
+                r.updated_at = datetime.now(UTC)
+            await s.commit()
+        return await self.get_flow_config(tenant_id=tenant_id, agent_id=agent_id)

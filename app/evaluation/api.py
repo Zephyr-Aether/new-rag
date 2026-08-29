@@ -230,3 +230,18 @@ async def get_version_regression(
     if latest is None:
         raise AgentError(f"no regression for {agent_id} v{version}", code="REGRESSION_NOT_FOUND")
     return latest
+
+
+@router.get("/agents/{agent_id}/regression-runs")
+async def list_regression_runs(
+    agent_id: str,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+    limit: int = Query(default=10, ge=1, le=50),
+) -> dict:
+    """评测运行历史：最近 N 次回归，含与上一次的通过率差值。"""
+    state: AppState = request.app.state.agent
+    runs = await state.evaluation_service.list_regressions(
+        tenant_id=subject.tenant_id, agent_id=agent_id, limit=limit
+    )
+    return {"agent_id": agent_id, "runs": runs}

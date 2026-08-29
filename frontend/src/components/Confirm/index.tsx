@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Modal } from '../ui'
+import { Button, Modal } from '../'
 
 export interface ConfirmReq {
   title: string

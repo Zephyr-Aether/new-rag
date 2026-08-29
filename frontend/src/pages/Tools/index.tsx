@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useRequest } from 'ahooks'
-import { api, CustomTool, McpServer } from '@/api'
-import { Badge, Button, Card, ErrorBox, Field, Stat, stateLabel, TableSkeleton } from '@/components/ui'
+import { api, CustomTool, McpServer } from '@/services'
+import { Badge, Button, Card, ErrorBox, Field, Stat, stateLabel, TableSkeleton } from '@/components'
 import { EmptyState, PageHeader } from '@/components/Page'
 import { useConfirm } from '@/components/Confirm'
 import ToolDetail, { ExecResult } from './components/ToolDetail'
 import McpDrawer from './components/McpDrawer'
 import CustomToolDrawer from './components/CustomToolDrawer'
+import { toast } from '@/toast'
 
 type CatalogSource = '内置' | 'MCP' | '自定义'
 
@@ -80,9 +81,7 @@ export default function Tools() {
 
   const [servers, setServers] = useState<McpServer[] | null>(null)
   const [customTools, setCustomTools] = useState<CustomTool[] | null>(null)
-  const [mcpMsg, setMcpMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [mcpBusy, setMcpBusy] = useState(false)
-  const [customMsg, setCustomMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [customBusy, setCustomBusy] = useState(false)
   const [lastMcpSync, setLastMcpSync] = useState('')
 
@@ -178,16 +177,15 @@ export default function Tools() {
   }
   async function saveMcp() {
     setMcpBusy(true)
-    setMcpMsg(null)
     try {
       const list = (servers ?? []).map((s) => ({ name: s.name, base_url: s.base_url, allow: s.allow, enabled: s.enabled }))
       const r = await api.mcpServersSet(list)
       const details = Object.entries(r.results || {}).map(([k, v]) => `${k}: ${v}`).join('；')
-      setMcpMsg({ kind: 'ok', text: `已保存 ${r.count} 个 server${details ? `（${details}）` : ''}` })
+      toast(`已保存 ${r.count} 个 server${details ? `（${details}）` : ''}`)
       setLastMcpSync(new Date().toLocaleTimeString())
       refresh()
     } catch (e) {
-      setMcpMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setMcpBusy(false)
     }
@@ -197,7 +195,6 @@ export default function Tools() {
   async function saveCustom(body: { ref: string; description: string; timeout_s: number; risk_level: string; input_schema: Record<string, unknown>; code: string }) {
     if (!body.ref.trim() || !body.code.trim()) return
     setCustomBusy(true)
-    setCustomMsg(null)
     try {
       const base = (customTools ?? []).filter((t) => t.ref !== body.ref.trim())
       const list = [
@@ -206,24 +203,23 @@ export default function Tools() {
       ]
       const r = await api.customToolsSet(list)
       const details = Object.entries(r.results || {}).map(([k, v]) => `${k}: ${v}`).join('；')
-      setCustomMsg({ kind: 'ok', text: `已保存 ${r.count} 个工具${details ? `（${details}）` : ''}` })
+      toast(`已保存 ${r.count} 个工具${details ? `（${details}）` : ''}`)
       refresh()
     } catch (e) {
-      setCustomMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setCustomBusy(false)
     }
   }
   async function deleteCustom(ref: string) {
     setCustomBusy(true)
-    setCustomMsg(null)
     try {
       const list = (customTools ?? []).filter((t) => t.ref !== ref).map((t) => ({ ref: t.ref, description: t.description, input_schema: t.input_schema, code: t.code, timeout_s: t.timeout_s, risk_level: t.risk_level }))
       await api.customToolsSet(list)
-      setCustomMsg({ kind: 'ok', text: `已删除 ${ref}` })
+      toast(`已删除 ${ref}`)
       refresh()
     } catch (e) {
-      setCustomMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setCustomBusy(false)
     }
@@ -235,7 +231,7 @@ export default function Tools() {
   const highRiskCount = builtIn.filter((t) => t.risk_level === 'HIGH_RISK_WRITE' || t.risk_level === 'CRITICAL').length
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="tools-page">
       {confirmEl}
       {error && <ErrorBox message={(error as Error).message} />}
 
@@ -243,12 +239,16 @@ export default function Tools() {
         title="工具"
         desc="能用什么、怎么用、要不要审批，都在这。先选一个工具，再决定怎么接入和试跑。"
         actions={
-          <>
+          <div className="tools-page-actions">
             <Button onClick={() => setMcpOpen(true)}>接入 MCP</Button>
             <Button onClick={() => setCustomOpen(true)}>新建自定义工具</Button>
-            <Link className="btn" to="/evaluation">去评测</Link>
-            <Link className="btn primary" to="/release">看发布链路</Link>
-          </>
+            <Button asChild>
+              <Link to="/evaluation">去评测</Link>
+            </Button>
+            <Button tone="primary" asChild>
+              <Link to="/release">看发布链路</Link>
+            </Button>
+          </div>
         }
       />
 
@@ -260,55 +260,65 @@ export default function Tools() {
       </div>
 
       <div className="tool-layout">
-        <Card title={`工具目录（${filteredCatalog.length}）`}>
-          <Field label="搜索">
-            <input value={toolQuery} onChange={(e) => setToolQuery(e.target.value)} placeholder="按 ref、说明、权限筛选" />
-          </Field>
-          <div className="row mb" style={{ gap: 6, flexWrap: 'wrap' }}>
-            {RISK_FILTERS.map((f) => (
-              <button key={f.value} className={`btn ${riskFilter === f.value ? 'primary' : ''}`} onClick={() => setRiskFilter(f.value)}>{f.label}</button>
-            ))}
-          </div>
-          <div className="row mb" style={{ gap: 6, flexWrap: 'wrap' }}>
-            {SOURCE_FILTERS.map((f) => (
-              <button key={f.value} className={`btn ${sourceFilter === f.value ? 'primary' : ''}`} onClick={() => setSourceFilter(f.value)}>{f.label}</button>
-            ))}
-          </div>
-          {loading ? (
-            <TableSkeleton rows={6} cols={3} />
-          ) : filteredCatalog.length === 0 ? (
-            <EmptyState
-              title="还没有工具"
-              desc="接入一个 MCP 源，或创建一个自定义工具，目录就会开始有内容。"
-              actions={
-                <div className="empty-state-actions">
-                  <Button onClick={() => setMcpOpen(true)}>接入 MCP</Button>
-                  <Button onClick={() => setCustomOpen(true)}>创建自定义工具</Button>
-                  <Link className="btn" to="/approvals">去看审批</Link>
-                </div>
-              }
-            />
-          ) : (
-            <div className="tool-list">
-              {filteredCatalog.map((t) => (
-                <button
-                  key={`${t.source}-${t.ref}`}
-                  type="button"
-                  className={`tool-list-item${sel === t.ref ? ' on' : ''}`}
-                  onClick={() => selectTool(t.ref)}
-                >
-                  <div className="tool-list-main">
-                    <span className="mono small">{t.ref}</span>
-                    <Badge status={riskBadge(t.risk_level)}>{stateLabel(t.risk_level)}</Badge>
-                  </div>
-                  <div className="tool-list-sub">
-                    <span className="tool-source-tag">{t.source}</span>
-                    <span className="small muted">{t.description}</span>
-                  </div>
-                </button>
+        <Card title={`工具目录（${filteredCatalog.length}）`} className="tools-panel tools-list-panel">
+          <div className="tools-panel-stack">
+            <Field label="搜索">
+              <input value={toolQuery} onChange={(e) => setToolQuery(e.target.value)} placeholder="按 ref、说明、权限筛选" />
+            </Field>
+            <div className="tools-filter-group">
+              {RISK_FILTERS.map((f) => (
+                <Button key={f.value} tone={riskFilter === f.value ? 'primary' : 'default'} onClick={() => setRiskFilter(f.value)}>
+                  {f.label}
+                </Button>
               ))}
             </div>
-          )}
+            <div className="tools-filter-group">
+              {SOURCE_FILTERS.map((f) => (
+                <Button key={f.value} tone={sourceFilter === f.value ? 'primary' : 'default'} onClick={() => setSourceFilter(f.value)}>
+                  {f.label}
+                </Button>
+              ))}
+            </div>
+            <div className="tool-list-body">
+              {loading ? (
+                <TableSkeleton rows={6} cols={3} />
+              ) : filteredCatalog.length === 0 ? (
+                <EmptyState
+                  title="还没有工具"
+                  desc="接入一个 MCP 源，或创建一个自定义工具，目录就会开始有内容。"
+                  actions={
+                    <div className="empty-state-actions">
+                      <Button onClick={() => setMcpOpen(true)}>接入 MCP</Button>
+                      <Button onClick={() => setCustomOpen(true)}>创建自定义工具</Button>
+                      <Button asChild>
+                        <Link to="/approvals">去看审批</Link>
+                      </Button>
+                    </div>
+                  }
+                />
+              ) : (
+                <div className="tool-list">
+                  {filteredCatalog.map((t) => (
+                    <button
+                      key={`${t.source}-${t.ref}`}
+                      type="button"
+                      className={`tool-list-item${sel === t.ref ? ' on' : ''}`}
+                      onClick={() => selectTool(t.ref)}
+                    >
+                      <div className="tool-list-main">
+                        <span className="mono small">{t.ref}</span>
+                        <Badge status={riskBadge(t.risk_level)}>{stateLabel(t.risk_level)}</Badge>
+                      </div>
+                      <div className="tool-list-sub">
+                        <span className="tool-source-tag">{t.source}</span>
+                        <span className="small muted">{t.description}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </Card>
 
         <ToolDetail
@@ -335,22 +345,30 @@ export default function Tools() {
 
       <div className="grid cols-2" style={{ alignItems: 'start' }}>
         <Card title="MCP 接入">
-          <div className="tool-source-summary">
-            <div className="tool-source-line"><span>已注册</span><b>{registeredMcp} / {servers?.length ?? 0}</b></div>
-            <div className="tool-source-line"><span>启用</span><b>{activeMcp}</b></div>
-            <div className="tool-source-line"><span>最近同步</span><b>{lastMcpSync || '—'}</b></div>
+          <div className="tools-card-copy">
+            <div className="tool-source-summary">
+              <div className="tool-source-line"><span>已注册</span><b>{registeredMcp} / {servers?.length ?? 0}</b></div>
+              <div className="tool-source-line"><span>启用</span><b>{activeMcp}</b></div>
+              <div className="tool-source-line"><span>最近同步</span><b>{lastMcpSync || '—'}</b></div>
+            </div>
+            <p className="small muted tools-card-desc">新增、编辑、删除 MCP 源都在接入面板里，主页面只保留状态。</p>
+            <div className="tools-card-actions">
+              <Button onClick={() => setMcpOpen(true)}>管理接入源</Button>
+            </div>
           </div>
-          <p className="small muted">新增、编辑、删除 MCP 源都在接入面板里，主页面只保留状态。</p>
-          <Button onClick={() => setMcpOpen(true)}>管理接入源</Button>
         </Card>
         <Card title="自定义工具">
-          <div className="tool-source-summary">
-            <div className="tool-source-line"><span>已注册</span><b>{registeredCustom} / {customTools?.length ?? 0}</b></div>
-            <div className="tool-source-line"><span>风险</span><b>{highRiskCount} 个高风险</b></div>
-            <div className="tool-source-line"><span>保存</span><b>热注册</b></div>
+          <div className="tools-card-copy">
+            <div className="tool-source-summary">
+              <div className="tool-source-line"><span>已注册</span><b>{registeredCustom} / {customTools?.length ?? 0}</b></div>
+              <div className="tool-source-line"><span>风险</span><b>{highRiskCount} 个高风险</b></div>
+              <div className="tool-source-line"><span>保存</span><b>热注册</b></div>
+            </div>
+            <p className="small muted tools-card-desc">把内部脚本包装成可审计的工具，三步创建、可编辑、可删除。</p>
+            <div className="tools-card-actions">
+              <Button onClick={() => setCustomOpen(true)}>管理自定义工具</Button>
+            </div>
           </div>
-          <p className="small muted">把内部脚本包装成可审计的工具，三步创建、可编辑、可删除。</p>
-          <Button onClick={() => setCustomOpen(true)}>管理自定义工具</Button>
         </Card>
       </div>
 
@@ -359,7 +377,6 @@ export default function Tools() {
         onClose={() => setMcpOpen(false)}
         servers={servers}
         busy={mcpBusy}
-        msg={mcpMsg}
         onAdd={addServer}
         onToggle={toggleServer}
         onRemove={removeServer}
@@ -371,7 +388,6 @@ export default function Tools() {
         customTools={customTools}
         reservedRefs={catalog.map((t) => t.ref)}
         busy={customBusy}
-        msg={customMsg}
         onSave={saveCustom}
         onDelete={deleteCustom}
       />

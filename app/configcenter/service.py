@@ -80,6 +80,34 @@ class ConfigService:
             return None
         return {"key": row.key, "value": json.loads(row.value_json), "version": row.version}
 
+    async def list_versions(
+        self, *, tenant_id: str, scope: str, scope_id: str, key: str, limit: int = 50
+    ) -> list[dict]:
+        """该 key 的版本历史（按 version 倒序），供配置页展示与回滚。"""
+        async with self.sessions() as s:
+            rows = (
+                await s.scalars(
+                    select(ConfigurationRow)
+                    .where(
+                        ConfigurationRow.tenant_id == tenant_id,
+                        ConfigurationRow.scope == scope,
+                        ConfigurationRow.scope_id == scope_id,
+                        ConfigurationRow.key == key,
+                    )
+                    .order_by(ConfigurationRow.version.desc())
+                    .limit(limit)
+                )
+            ).all()
+        return [
+            {
+                "key": row.key,
+                "value": json.loads(row.value_json),
+                "version": row.version,
+                "created_at": row.created_at.isoformat() if getattr(row, "created_at", None) else None,
+            }
+            for row in rows
+        ]
+
 
 class FlagService:
     def __init__(self, sessions):

@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useRequest } from 'ahooks'
-import { Drawer } from 'antd'
-import { api, UserRow } from '@/api'
-import { Badge, Button, Card, ErrorBox, Field, PasswordInput, PermissionDenied, SuccessBox, TableSkeleton } from '@/components/ui'
+import { Pagination } from '@/components/pagination'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/sheet'
+import { api, UserRow } from '@/services'
+import { Badge, Button, Card, Field, PasswordInput, PermissionDenied, TableSkeleton } from '@/components'
 import { EmptyState, PageHeader } from '@/components/Page'
 import { useConfirm } from '@/components/Confirm'
 import { usePermissions } from '@/hooks/usePermissions'
+import { toast } from '@/toast'
+
+const PAGE_SIZE = 10
 
 type AcctType = 'user' | 'admin' | 'custom'
 
@@ -17,6 +21,15 @@ function roleMatches(name: string, keywords: string[]) {
   const n = (name || '').toLowerCase()
   return keywords.some((k) => n.includes(k.toLowerCase()))
 }
+
+function userTypeOf(u: UserRow, adminRoles: { id: string }[], baseRoles: { id: string }[]): AcctType {
+  const ids = u.role_ids ?? []
+  if (ids.some((id) => adminRoles.some((r) => r.id === id))) return 'admin'
+  if (ids.length === 0 || ids.every((id) => baseRoles.some((r) => r.id === id))) return 'user'
+  return 'custom'
+}
+const ACCT_LABEL: Record<AcctType, string> = { user: '基础成员', admin: '管理员', custom: '自定义' }
+const ACCT_BADGE_STATUS: Record<AcctType, string> = { user: 'READY', admin: 'PASS', custom: 'DRAFT' }
 
 export default function Users() {
   const { can } = usePermissions()
@@ -30,7 +43,6 @@ export default function Users() {
   const adminRoles = roles.filter((r) => roleMatches(r.name, ADMIN_KEYWORDS))
   const baseRoles = roles.filter((r) => roleMatches(r.name, BASE_KEYWORDS))
   const [denied, setDenied] = useState(false)
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [busy, setBusy] = useState('')
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<UserRow | null>(null)
@@ -41,6 +53,8 @@ export default function Users() {
   const [enabled, setEnabled] = useState(true)
   const [roleIds, setRoleIds] = useState<string[]>([])
   const [acctType, setAcctType] = useState<AcctType>('user')
+  const [userPage, setUserPage] = useState(1)
+  const [tenantPage, setTenantPage] = useState(1)
   // 租户 onboarding
   const tenants = data?.[2].tenants ?? []
   const [tName, setTName] = useState('')
@@ -63,7 +77,6 @@ export default function Users() {
     setEnabled(true)
     setAcctType('user')
     setRoleIds(baseRoles.map((r) => r.id))
-    setMsg(null)
     setOpen(true)
   }
 
@@ -79,7 +92,6 @@ export default function Users() {
     setEnabled(u.enabled)
     setAcctType(hasAdmin ? 'admin' : allBase ? 'user' : 'custom')
     setRoleIds(ids)
-    setMsg(null)
     setOpen(true)
   }
 
@@ -93,7 +105,6 @@ export default function Users() {
   async function save() {
     if (!userId.trim()) return
     setBusy('save')
-    setMsg(null)
     try {
       if (editing) {
         await api.userUpdate(editing.id, {
@@ -112,11 +123,11 @@ export default function Users() {
           role_ids: roleIds,
         })
       }
-      setMsg({ kind: 'ok', text: editing ? '用户已更新' : '用户已创建' })
+      toast(editing ? '用户已更新' : '用户已创建')
       setOpen(false)
       refresh()
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy('')
     }
@@ -126,9 +137,10 @@ export default function Users() {
     setBusy(u.id)
     try {
       await api.userUpdate(u.id, { enabled: !u.enabled })
+      toast(u.enabled ? '用户已禁用' : '用户已启用')
       refresh()
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy('')
     }
@@ -138,9 +150,10 @@ export default function Users() {
     setBusy(u.id)
     try {
       await api.userDelete(u.id)
+      toast('用户已删除')
       refresh()
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy('')
     }
@@ -162,7 +175,6 @@ export default function Users() {
   async function createTenant() {
     if (!tName.trim() || !tAdmin.trim()) return
     setTBusy(true)
-    setMsg(null)
     try {
       await api.tenantCreate({
         name: tName.trim(),
@@ -170,14 +182,14 @@ export default function Users() {
         admin_user_id: tAdmin.trim(),
         admin_password: tAdminPwd || undefined,
       })
-      setMsg({ kind: 'ok', text: '租户已创建' })
+      toast('租户已创建')
       setTName('')
       setTId('')
       setTAdmin('')
       setTAdminPwd('')
       refresh()
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setTBusy(false)
     }
@@ -210,20 +222,35 @@ export default function Users() {
           </Button>
         </div>
         {tenants.length > 0 && (
-          <div className="small" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {tenants.map((t) => (
-              <span key={t.id} className="mono small" style={{ background: '#f1f5f9', borderRadius: 6, padding: '2px 8px' }}>
-                {t.name} · {t.id}
-              </span>
-            ))}
-          </div>
+          <>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>租户 ID</th>
+                  <th>名称</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tenants.slice((tenantPage - 1) * PAGE_SIZE, tenantPage * PAGE_SIZE).map((t) => (
+                  <tr key={t.id}>
+                    <td className="mono small">{t.id}</td>
+                    <td className="small">{t.name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {tenants.length > PAGE_SIZE && (
+              <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+                <Pagination current={tenantPage} pageSize={PAGE_SIZE} total={tenants.length} onChange={setTenantPage} />
+              </div>
+            )}
+          </>
         )}
       </Card>
 
       <Card title={`用户（${rows?.length ?? '…'}）`}>
         <div className="row mb">
           <Button tone="primary" disabled={!can('policy:manage')} onClick={openNew}>新建用户</Button>
-          {msg && (msg.kind === 'ok' ? <SuccessBox message={msg.text} /> : <ErrorBox message={msg.text} />)}
         </div>
         {loading ? (
           <TableSkeleton rows={5} cols={4} />
@@ -241,23 +268,26 @@ export default function Users() {
                 <th>用户</th>
                 <th>邮箱</th>
                 <th>显示名</th>
+                <th>账户类型</th>
                 <th>状态</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              {(rows ?? []).map((u) => (
+              {(rows ?? []).slice((userPage - 1) * PAGE_SIZE, userPage * PAGE_SIZE).map((u) => (
                 <tr key={u.id}>
                   <td className="mono small">
                     {u.id}
-                    {u.must_change_password && <span className="small" style={{ color: 'var(--warning)' }}> · 待改密</span>}
                   </td>
                   <td className="small">{u.email}</td>
+                  <td className="small">{u.display_name || '—'}</td>
                   <td className="small">
-                    {u.display_name || '—'}
-                    {u.role_ids?.some((id) => adminRoles.some((r) => r.id === id)) && (
-                      <span className="admin-badge">管理员</span>
-                    )}
+                    <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                      <Badge status={ACCT_BADGE_STATUS[userTypeOf(u, adminRoles, baseRoles)]}>
+                        {ACCT_LABEL[userTypeOf(u, adminRoles, baseRoles)]}
+                      </Badge>
+                      {u.must_change_password && <Badge status="WARN">待改密</Badge>}
+                    </div>
                   </td>
                   <td><Badge status={u.enabled ? 'PASS' : 'DISABLED'}>{u.enabled ? '启用' : '禁用'}</Badge></td>
                   <td>
@@ -272,9 +302,19 @@ export default function Users() {
             </tbody>
           </table>
         )}
+        {(rows?.length ?? 0) > PAGE_SIZE && (
+          <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+            <Pagination current={userPage} pageSize={PAGE_SIZE} total={rows?.length ?? 0} onChange={setUserPage} />
+          </div>
+        )}
       </Card>
 
-      <Drawer title={editing ? `编辑用户 ${editing.id}` : '新建用户'} open={open} onClose={() => setOpen(false)}>
+      <Sheet open={open} onOpenChange={(o) => !o && setOpen(false)}>
+      <SheetContent side="right" className="w-[480px] max-w-[480px] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>{editing ? `编辑用户 ${editing.id}` : '新建用户'}</SheetTitle>
+        </SheetHeader>
+        <div className="px-4">
         <Field label="用户 ID">
           <input value={userId} disabled={!!editing} onChange={(e) => setUserId(e.target.value)} placeholder="user-abc" />
         </Field>
@@ -347,7 +387,9 @@ export default function Users() {
         <Button tone="primary" disabled={busy === 'save' || !userId.trim()} onClick={save}>
           {busy === 'save' ? '保存中…' : '保存'}
         </Button>
-      </Drawer>
+              </div>
+      </SheetContent>
+    </Sheet>
     </div>
   )
 }

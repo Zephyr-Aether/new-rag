@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { api, ContractCheck, Regression, Version } from '@/api'
-import { Badge, Button, ErrorBox, Field, Modal, SuccessBox, stateLabel } from '@/components/ui'
-
+import { api, ContractCheck, Regression, Version } from '@/services'
+import { Badge, Button, ErrorBox, Field, Modal, stateLabel, SuccessBox } from '@/components'
 const STEP_NAMES = ['兼容性检查', '回归验证', '发布', '灰度放量']
 
 export default function ReleaseWizard({

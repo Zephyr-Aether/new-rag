@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Bot, ChevronDown, UserRound } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Badge } from '@/components/ui'
+import { Badge } from '@/components'
 import { ChatMsg } from '../../type/chat'
 import { normalizeContent } from '../../util/chat'
 

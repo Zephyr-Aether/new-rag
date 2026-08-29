@@ -1,10 +1,13 @@
 import { useState } from 'react'
+import { Pagination } from '@/components/pagination'
 import { useRequest } from 'ahooks'
-import { api, ApprovalRow } from '@/api'
-import { Badge, Button, Card, ErrorBox, Loading, Modal, TableSkeleton, fmtTime, shortId, stateLabel } from '@/components/ui'
+import { api, ApprovalRow } from '@/services'
+import { Badge, Button, Card, Loading, Modal, TableSkeleton, fmtTime, shortId, stateLabel } from '@/components'
 import { useConfirm } from '@/components/Confirm'
 import { EmptyState, PageError, PageHeader } from '@/components/Page'
+import { toast } from '@/toast'
 
+const PAGE_SIZE = 10
 const STATUSES = ['', 'PENDING', 'APPROVED', 'REJECTED', 'TIMEOUT']
 const RISK_RANK: Record<string, number> = { CRITICAL: 4, HIGH_RISK_WRITE: 3, LOW_RISK_WRITE: 2, READ: 1 }
 
@@ -12,11 +15,12 @@ export default function Approvals() {
   const { confirm, confirmEl } = useConfirm()
   const { data, loading, error, run } = useRequest((st: string) => api.approvals(st), { defaultParams: [''] as [string] })
   const rows = data?.rows ?? null
+  const pagerTotal = rows?.length ?? 0
   const pendingReq = useRequest(() => api.approvals('PENDING'))
   const pending = pendingReq.data?.rows ?? null
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [busy, setBusy] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [page, setPage] = useState(1)
   const [detail, setDetail] = useState<ApprovalRow | null>(null)
   const [detailBusy, setDetailBusy] = useState(false)
 
@@ -34,18 +38,17 @@ export default function Approvals() {
 
   async function decide(id: string, approve: boolean) {
     setBusy(id)
-    setMsg(null)
     try {
       const r: Record<string, unknown> = approve ? await api.approve(id) : await api.reject(id)
       const resumed = (r as { resumed?: { run_id?: string; state?: string } }).resumed
-      setMsg(
+      toast(
         resumed && resumed.run_id
-          ? { kind: 'ok', text: `${approve ? '已批准' : '已拒绝'} · 被阻塞的 run ${shortId(resumed.run_id)} 已自动续跑（${stateLabel(resumed.state ?? '')}）` }
-          : { kind: 'ok', text: approve ? '已批准' : '已拒绝' },
+          ? `${approve ? '已批准' : '已拒绝'} · 被阻塞的 run ${shortId(resumed.run_id)} 已自动续跑（${stateLabel(resumed.state ?? '')}）`
+          : (approve ? '已批准' : '已拒绝'),
       )
       run(statusFilter)
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy('')
     }
@@ -56,7 +59,7 @@ export default function Approvals() {
     try {
       setDetail(await api.approval(id))
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setDetailBusy(false)
     }
@@ -66,8 +69,7 @@ export default function Approvals() {
     <div>
       {confirmEl}
       {error && <div className="mb"><PageError message={(error as Error).message} retry={() => run(statusFilter)} /></div>}
-      {msg && <div className="mb">{msg.kind === 'ok' ? <div className="success-box">{msg.text}</div> : <ErrorBox message={msg.text} />}</div>}
-      <PageHeader title="审批" desc="高风险工具调用的放行决策与审批门禁" />
+            <PageHeader title="审批" desc="高风险工具调用的放行决策与审批门禁" />
 
       <Card title="审批小结" className="mb">
         {pendingReq.loading ? (
@@ -94,6 +96,7 @@ export default function Approvals() {
               className={`btn ${statusFilter === s ? 'primary' : ''}`}
               onClick={() => {
                 setStatusFilter(s)
+                setPage(1)
                 run(s)
               }}
             >
@@ -109,6 +112,7 @@ export default function Approvals() {
             desc="高风险工具调用需要审批时，这里会列出待处理的请求。"
           />
         ) : (
+          <>
           <table className="tbl">
             <thead>
               <tr>
@@ -122,7 +126,7 @@ export default function Approvals() {
               </tr>
             </thead>
             <tbody>
-              {(rows ?? []).map((a) => (
+              {(rows ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((a) => (
                 <tr key={a.approval_id}>
                   <td className="mono small">{shortId(a.approval_id)}</td>
                   <td className="mono small muted">{fmtTime(a.created_at)}</td>
@@ -153,6 +157,12 @@ export default function Approvals() {
               ))}
             </tbody>
           </table>
+          {pagerTotal > PAGE_SIZE && (
+            <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+              <Pagination current={page} pageSize={PAGE_SIZE} total={pagerTotal} onChange={setPage} />
+            </div>
+          )}
+          </>
         )}
       </Card>
 

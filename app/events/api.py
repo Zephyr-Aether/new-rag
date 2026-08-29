@@ -68,3 +68,14 @@ async def replay_events(
     state: AppState = request.app.state.agent
     rows = await state.event_outbox.replay(tenant_id=subject.tenant_id, aggregate_id=aggregate_id)
     return {"aggregate_id": aggregate_id, "events": rows, "total": len(rows)}
+
+
+@router.get("/aggregate/{aggregate_id}/state")
+async def aggregate_state(
+    aggregate_id: str,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+) -> dict:
+    """聚合当前状态快照（事件数/类型分布/最后一条），供重放前后对比。"""
+    state: AppState = request.app.state.agent
+    return await state.event_outbox.aggregate_state(tenant_id=subject.tenant_id, aggregate_id=aggregate_id)

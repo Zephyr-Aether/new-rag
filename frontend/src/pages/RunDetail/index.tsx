@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   api,
@@ -11,8 +12,8 @@ import {
   ScheduleDecision,
   Step,
   TracePayload,
-} from '@/api'
-import { Badge, Button, Card, Empty, ErrorBox, Field, fmtCost, Loading, Modal, shortId, SuccessBox, TableSkeleton } from '@/components/ui'
+} from '@/services'
+import { Badge, Button, Card, Empty, ErrorBox, Field, fmtCost, Loading, Modal, shortId, SuccessBox, TableSkeleton } from '@/components'
 import { useConfirm } from '@/components/Confirm'
 
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'UNKNOWN']
@@ -243,7 +244,10 @@ function FeedbackBar({ runId }: { runId: string }) {
   const [reason, setReason] = useState('')
   const [note, setNote] = useState('')
   const [err, setErr] = useState('')
+  const [sending, setSending] = useState(false)
   async function send(feedback: 'good' | 'bad') {
+    if (sending) return
+    setSending(true)
     setErr('')
     try {
       const r = await api.runFeedback(runId, feedback, reason.trim())
@@ -255,6 +259,8 @@ function FeedbackBar({ runId }: { runId: string }) {
       setStage('done')
     } catch (e) {
       setErr((e as Error).message)
+    } finally {
+      setSending(false)
     }
   }
   if (stage === 'done') return <SuccessBox message={note} />
@@ -262,8 +268,8 @@ function FeedbackBar({ runId }: { runId: string }) {
     <div className="mt">
       <div className="row small">
         <span className="muted">这次回答有帮助吗？</span>
-        <Button onClick={() => send('good')}>👍 有帮助</Button>
-        <Button onClick={() => setStage('bad')}>👎 有问题</Button>
+        <Button disabled={sending} onClick={() => send('good')}>{sending ? '提交中…' : '👍 有帮助'}</Button>
+        <Button disabled={sending} onClick={() => setStage('bad')}>👎 有问题</Button>
       </div>
       {stage === 'bad' && (
         <div className="row mt">
@@ -273,7 +279,9 @@ function FeedbackBar({ runId }: { runId: string }) {
             placeholder="问题描述（可选），将自动录入 badcase"
             style={{ flex: 1 }}
           />
-          <Button tone="danger" onClick={() => send('bad')}>提交</Button>
+          <Button tone="danger" disabled={sending || !reason.trim()} onClick={() => send('bad')}>
+            {sending ? '提交中…' : '提交'}
+          </Button>
         </div>
       )}
       {err && <ErrorBox message={err} />}
@@ -417,7 +425,7 @@ export default function RunDetail() {
   }
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid" style={{ gap: 16 }}>
       {confirmEl}
       {/* 页头：任务标识 + 状态 + 操作 */}
       <div className="page-header">
@@ -475,7 +483,7 @@ export default function RunDetail() {
             </div>
           </div>
         ) : answer ? (
-          <div className="result-panel">{answer}</div>
+          <div className="result-panel"><ReactMarkdown>{answer}</ReactMarkdown></div>
         ) : (
           <Empty text="该任务尚未生成文本结果" />
         )}

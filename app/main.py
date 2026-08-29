@@ -185,6 +185,7 @@ def _http_status_for(code: str) -> int:
         "UPLOAD_TOO_LARGE",
         "UPLOAD_INCOMPLETE",
         "INVALID_STATE_TRANSITION",
+        "RELEASE_FLOW_TERMINATED",
         "RELEASE_CONTRACT_FAILED",
         "RELEASE_REGRESSION_FAILED",
         "MEMORY_POISONED",

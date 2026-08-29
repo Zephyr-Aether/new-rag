@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { api } from '@/api'
-import { Button, Card, ErrorBox, Field, SuccessBox } from '@/components/ui'
+import { api } from '@/services'
+import { Button, Card, Field } from '@/components'
 import { PageHeader } from '@/components/Page'
 import { useConfirm } from '@/components/Confirm'
+import { toast } from '@/toast'
 
 const PRESETS = [
   { label: '更保守', retention: '7', audit: '90', payload: '7' },
@@ -15,20 +16,15 @@ export default function Data() {
   const [retention, setRetention] = useState('30')
   const [auditDays, setAuditDays] = useState('180')
   const [payloadDays, setPayloadDays] = useState('30')
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [busy, setBusy] = useState('')
 
   async function sweep() {
     setBusy('sweep')
-    setMsg(null)
     try {
       const r = await api.dataSweep(Number(retention), Number(auditDays), Number(payloadDays))
-      setMsg({
-        kind: 'ok',
-        text: `清扫完成：删 ${r.deleted_runs} run（run ${r.retention_days}d / 审计 ${r.audit_days}d / payload ${r.payload_days}d）`,
-      })
+      toast(`清扫完成：删 ${r.deleted_runs} run（run ${r.retention_days}d / 审计 ${r.audit_days}d / payload ${r.payload_days}d）`,)
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy('')
     }
@@ -38,7 +34,6 @@ export default function Data() {
     setRetention(retentionDays)
     setAuditDays(auditLogDays)
     setPayloadDays(payloadLogDays)
-    setMsg(null)
   }
 
   return (
@@ -79,7 +74,7 @@ export default function Data() {
           >
             {busy === 'sweep' ? '清扫中…' : '执行清扫'}
           </Button>
-          {msg && <div className="mt">{msg.kind === 'ok' ? <SuccessBox message={msg.text} /> : <ErrorBox message={msg.text} />}</div>}
+          
         </Card>
 
         <Card title="建议策略">

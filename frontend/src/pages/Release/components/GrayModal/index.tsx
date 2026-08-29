@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Button, Field, Modal } from '@/components/ui'
-
+import { Button, Field, Modal } from '@/components'
 export default function GrayModal({ version, onClose, onSubmit }: { version: number; onClose: () => void; onSubmit: (pct: number) => void }) {
   const [pct, setPct] = useState('10')
   return (

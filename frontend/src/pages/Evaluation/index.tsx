@@ -1,13 +1,17 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Pagination } from '@/components/pagination'
+import { Link, useNavigate } from 'react-router-dom'
 import { useRequest } from 'ahooks'
-import { ArrowRight, Info } from 'lucide-react'
-import { api } from '@/api'
-import { Badge, Button, Card, ErrorBox, Field, fmtTime, Stat, SuccessBox, TableSkeleton } from '@/components/ui'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Info } from 'lucide-react'
+import { api } from '@/services'
+import { Badge, Button, Card, ErrorBox, Field, fmtTime, SuccessBox, TableSkeleton } from '@/components'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/tooltip'
 import { EmptyState, FlowChain, PageError, PageHeader } from '@/components/Page'
 import { CodeEditor } from '@/components/CodeEditor'
 import { usePermissions } from '@/hooks/usePermissions'
+import { toast } from '@/toast'
+
+const PAGE_SIZE = 10
 
 const KINDS = ['GOLDEN', 'REGRESSION', 'BADCASES', 'ADVERSARIAL']
 
@@ -57,8 +61,9 @@ const EVAL_ACTIONS = [
 
 export default function Evaluation() {
   const { can } = usePermissions()
+  const navigate = useNavigate()
   const [kind, setKind] = useState('GOLDEN')
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [page, setPage] = useState(1)
   const [busy, setBusy] = useState(false)
   const [query, setQuery] = useState('')
   const [reason, setReason] = useState('')
@@ -87,6 +92,11 @@ export default function Evaluation() {
       setSeedSource(r.source || '未知来源')
     },
   })
+  const runsReq = useRequest(async () => {
+    const m = await api.meta()
+    return api.regressionRuns(m.agent_id)
+  })
+  const evalRuns = runsReq.data?.runs ?? null
 
   const refresh = (k = kind) => {
     run(k)
@@ -122,7 +132,6 @@ export default function Evaluation() {
   async function add() {
     if (!query.trim()) return
     setBusy(true)
-    setMsg(null)
     try {
       await api.addEvalCase({
         query: query.trim(),
@@ -134,7 +143,7 @@ export default function Evaluation() {
         expected_tool_calls: toolCalls ? toolCalls.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
         must_not_call: mustNotCall ? mustNotCall.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
       })
-      setMsg({ kind: 'ok', text: '已录入样例' })
+      toast('已录入样例')
       setQuery('')
       setReason('')
       setCategory('')
@@ -143,7 +152,7 @@ export default function Evaluation() {
       setExpected('')
       refresh()
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy(false)
     }
@@ -156,198 +165,86 @@ export default function Evaluation() {
   const badcaseCount = counts.BADCASES ?? 0
   const gateReady = goldenCount > 0 && regressionCount > 0
   const selectedCount = counts[kind] ?? 0
-  const testAdvice =
-    testTotal === 0
-      ? '测试集还是空的：先录入第一条样例，或展开“种子同步”批量导入。'
-      : gateReady
-        ? `门禁基础已经齐了：黄金集 ${goldenCount} 条、回归集 ${regressionCount} 条，坏案例 ${badcaseCount} 条、对抗集 ${adversarialCount} 条。可以去发布页跑契约、回归和灰度。`
-        : `当前已有 ${testTotal} 条样例，但门禁还不够完整：建议先补齐黄金集和回归集，再把坏案例 ${badcaseCount} 条、对抗集 ${adversarialCount} 条补上。`
+
+  const missing = []
+  if (goldenCount === 0) missing.push('黄金集')
+  if (regressionCount === 0) missing.push('回归集')
+  const verdict = testTotal === 0
+    ? { status: '待补样本', ok: false, reason: '还没有任何评测样例，门禁无从谈起。', action: '先补第一条黄金集样例，再补回归集。' }
+    : missing.length === 0
+      ? { status: '通过', ok: true, reason: `黄金集 ${goldenCount} / 回归集 ${regressionCount} 已就位，坏案例 ${badcaseCount}、对抗集 ${adversarialCount}。`, action: '可以去发布页跑契约、回归和灰度。' }
+      : { status: '待补样本', ok: false, reason: `门禁还缺 ${missing.join('、')}，当前 ${testTotal} 条样例撑不起稳定门禁。`, action: `先补${missing[0]}，再补${missing[1] ?? '坏案例'}。` }
+
+  const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  void verdict
+  void scrollTo
+
+  function downloadTemplate() {
+    const tpl = [
+      { query: '退货几天内到账？', kind: 'GOLDEN', category: 'refund', expected: ['3', '5'], reason: '示例黄金样例' },
+      { query: '知识库: 退款政策', kind: 'REGRESSION', expected: [], reason: '示例回归样例' },
+    ]
+    const blob = new Blob([JSON.stringify(tpl, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'eval-template.json'
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  const kindCards = KINDS.map((k) => ({
+    key: k,
+    label: KIND_LABELS[k] ?? k,
+    desc: KIND_DESC[k] ?? '',
+    count: counts[k] ?? 0,
+    active: kind === k,
+  }))
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid evaluation-page" style={{ gap: 16 }}>
       {error && <PageError message={(error as Error).message} retry={() => refresh()} />}
 
       <FlowChain current="evaluation" />
       <PageHeader
         title="评测"
-        desc="这一步负责设门禁：补齐样例形成门禁，只有通过的版本才允许放量发布。"
+        desc="这一步只回答一件事：这版能不能发。先补样例，再看回归，够了再去发布。"
         actions={
           <>
-            <Link className="btn" to="/model">
-              看模型健康
-            </Link>
-            <Link className="btn primary" to="/release">
-              去发布
-            </Link>
+            <Button onClick={() => scrollTo('eval-library')}>样例库</Button>
+            <Button onClick={() => scrollTo('eval-input')}>补样本</Button>
+            <Button onClick={() => scrollTo('eval-import')}>批量导入</Button>
+            <Button tone="primary" onClick={() => navigate('/release')}>
+              看发布页
+            </Button>
           </>
         }
       />
 
-      <div className="home-hint">
-        <div className="home-hint-copy">
-          <span className="home-hint-kicker">评测门禁</span>
-          <span>{testAdvice}</span>
-          <span className="small muted" style={{ color: 'var(--text-2)' }}>
-            当前最重要的是补出能拦住回退的样例，而不是把配置做得更长。
-          </span>
+      <Card className="evaluation-hero">
+        <div className="evaluation-hero-main">
+          <div className="evaluation-hero-kicker">评测门禁</div>
+          <div className="evaluation-hero-title">这版能不能发？</div>
+          <div className="evaluation-hero-copy">{verdict.reason}</div>
+          <div className="evaluation-hero-action">建议：{verdict.action}</div>
+          <div className="evaluation-hero-foot">
+            <span>黄金集 {goldenCount}</span>
+            <span>回归集 {regressionCount}</span>
+            <span>坏案例 {badcaseCount}</span>
+            <span>对抗集 {adversarialCount}</span>
+            <span className={gateReady ? 'good' : 'warn'}>{gateReady ? '门禁已就绪' : '还需要补样'}</span>
+          </div>
         </div>
-        <div className="row" style={{ flexWrap: 'wrap' }}>
-          <Link className="btn" to="/release">
-            <span className="row" style={{ gap: 6 }}>
-              去看发布 <ArrowRight size={14} />
-            </span>
-          </Link>
-          <Link className="btn" to="/model">
-            <span className="row" style={{ gap: 6 }}>
-              看健康页 <ArrowRight size={14} />
-            </span>
-          </Link>
-        </div>
-      </div>
-
-      <div className="grid cols-3">
-        <Stat label="样例总数" value={testTotal} sub="四类样例合计，直接决定门禁厚度" />
-        <Stat label="黄金 + 回归" value={`${goldenCount} / ${regressionCount}`} sub="发版时优先看这两类" />
-        <Stat
-          label="是否可发布"
-          value={<Badge status={gateReady ? 'OK' : 'WARN'}>{gateReady ? '可发布' : '需补样'}</Badge>}
-          sub={
-            gateReady
-              ? '门禁已过：可以去发布页跑契约、回归和灰度'
-              : '门禁未过：先补齐黄金集和回归集'
-          }
-        />
-      </div>
-
-      <Card title="门禁摘要">
-          {initialLoading ? (
-            <TableSkeleton rows={2} cols={4} />
-          ) : (
-            <>
-              <div className="status-grid">
-              {KINDS.map((k) => (
-                <div key={k} className="status-row">
-                  <span className="status-label">{KIND_LABELS[k] ?? k}</span>
-                  <span className="status-value">
-                    <b>{counts[k] ?? 0}</b> 条
-                  </span>
-                </div>
-              ))}
-              <div className="status-row">
-                <span className="status-label">门禁状态</span>
-                <span className="status-value">
-                  <Badge status={gateReady ? 'OK' : 'WARN'}>{gateReady ? '可发布' : '需补样'}</Badge>
-                </span>
-              </div>
+        <div className="evaluation-hero-side">
+          <div className="evaluation-hero-status">
+            <Badge status={gateReady ? 'OK' : 'WARN'}>{gateReady ? '可发布' : '需补样'}</Badge>
+            <div className="evaluation-hero-status-copy">
+              <div className="evaluation-hero-status-title">当前样例 {testTotal} 条</div>
+              <div className="evaluation-hero-status-sub">补齐黄金集和回归集后，再去发布页跑契约与灰度。</div>
             </div>
-            <div className="small muted" style={{ marginTop: 12, lineHeight: 1.6 }}>
-              {testAdvice}
-            </div>
-          </>
-        )}
-      </Card>
-
-      <div className="grid cols-2" style={{ alignItems: 'start' }}>
-        <div className="grid" style={{ gap: 16 }}>
-          <Card
-            title={
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                样例库 · {KIND_LABELS[kind] ?? kind}
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info size={14} style={{ color: 'var(--text-3)', cursor: 'help' }} />
-                    </TooltipTrigger>
-                    <TooltipContent>{KIND_DESC[kind] ?? ''}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </span>
-            }
-          >
-            <div className="small muted" style={{ marginBottom: 10 }}>
-              当前分类有 <b>{selectedCount}</b> 条样例，点下面的分类条即可切换。
-            </div>
-            <div className="grid cols-2" style={{ gap: 10, marginBottom: 14 }}>
-              {KINDS.map((k) => (
-                <button
-                  key={k}
-                  className={`action-tile stat-link ${kind === k ? 'recommended' : ''}`}
-                  onClick={() => {
-                    setKind(k)
-                    refresh(k)
-                  }}
-                >
-                  <div className="stat">
-                    <div className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                      <span>{KIND_LABELS[k] ?? k}</span>
-                      <Badge status={(counts[k] ?? 0) > 0 ? 'OK' : 'WARN'}>{counts[k] ?? 0} 条</Badge>
-                    </div>
-                    <div className="sub">{KIND_DESC[k]}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-            {refreshing && (
-              <div className="small muted" style={{ margin: '-2px 0 10px' }}>
-                正在切换到 <b>{KIND_LABELS[kind] ?? kind}</b>，先保留当前列表。
-              </div>
-            )}
-            {initialLoading ? (
-              <TableSkeleton rows={5} cols={5} />
-            ) : (rows ?? []).length === 0 ? (
-              <EmptyState
-                title="该数据集还没有样例"
-                desc="先在右侧录入样例，或展开高级种子同步批量导入。发布前最好先补一条黄金集和一条回归集。"
-                actions={
-                  <div className="empty-state-actions">
-                    <Link className="btn primary" to="/release">
-                      去发布
-                    </Link>
-                    <Link className="btn" to="/model">
-                      看模型健康
-                    </Link>
-                  </div>
-                }
-              />
-            ) : (
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>问题</th>
-                    <th>期望工具</th>
-                    <th>判定</th>
-                    <th>原因</th>
-                    <th>分类</th>
-                    <th>时间</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(rows ?? []).map((c) => (
-                    <tr key={c.case_id}>
-                      <td className="small">{c.query}</td>
-                      <td className="small">
-                        {c.expected_tool_calls && c.expected_tool_calls.length > 0 ? (
-                          <span className="muted mono" style={{ fontSize: 11 }}>
-                            {c.expected_tool_calls.join(' → ')}
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="small muted">{c.judge_type === 'llm' ? 'LLM 判定' : '关键词'}</td>
-                      <td className="small muted">{c.reason || '—'}</td>
-                      <td className="small muted">{c.category ? CATEGORY_LABELS[c.category] ?? c.category : '—'}</td>
-                      <td className="mono small muted">{fmtTime(c.created_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Card>
-
-          <div className="grid cols-3">
+          </div>
+          <div className="evaluation-hero-links">
             {EVAL_ACTIONS.map((a) => (
-              <Link key={a.to} className="stat-link action-tile" to={a.to}>
+              <Link key={a.to} className="stat-link action-tile evaluation-hero-link" to={a.to}>
                 <div className="stat">
                   <div className="label">{a.title}</div>
                   <div className="sub">{a.desc}</div>
@@ -356,30 +253,197 @@ export default function Evaluation() {
             ))}
           </div>
         </div>
+      </Card>
 
-        <div className="grid" style={{ gap: 16 }}>
-          <Card title="录入样例">
-            <div className="small muted" style={{ marginBottom: 10 }}>
+      <div className="evaluation-layout">
+        <div className="evaluation-main">
+          <Card id="eval-library" title={
+            <span className="evaluation-card-title">
+              <span>样例库</span>
+              <span className="evaluation-card-sub">当前分类 · {KIND_LABELS[kind] ?? kind}</span>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info size={14} style={{ color: 'var(--text-3)', cursor: 'help' }} />
+                  </TooltipTrigger>
+                  <TooltipContent>{KIND_DESC[kind] ?? ''}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </span>
+          }>
+            <div className="evaluation-library-head">
+              <div className="small muted">
+                当前分类有 <b>{selectedCount}</b> 条样例。切换分类后会自动刷新列表。
+              </div>
+              <Button onClick={() => refresh()} disabled={initialLoading || refreshing}>刷新当前分类</Button>
+            </div>
+
+            <div className="evaluation-kind-grid">
+              {kindCards.map((item) => (
+                <button
+                  key={item.key}
+                  className={`action-tile stat-link evaluation-kind-card${item.active ? ' recommended' : ''}`}
+                  onClick={() => {
+                    setKind(item.key)
+                    setPage(1)
+                    refresh(item.key)
+                  }}
+                >
+                  <div className="stat">
+                    <div className="label evaluation-kind-label">
+                      <span>{item.label}</span>
+                      <Badge status={item.count > 0 ? 'OK' : 'WARN'}>{item.count} 条</Badge>
+                    </div>
+                    <div className="sub">{item.desc}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {refreshing && (
+              <div className="evaluation-refreshing small muted">
+                正在切换到 <b>{KIND_LABELS[kind] ?? kind}</b>，先保留当前列表。
+              </div>
+            )}
+
+            {initialLoading ? (
+              <TableSkeleton rows={5} cols={5} />
+            ) : (rows ?? []).length === 0 ? (
+              <EmptyState
+                title="该数据集还没有样例"
+                desc="先补一条样例让门禁开始生效，或者直接批量导入。发布前最好至少有一条黄金集和一条回归集。"
+                actions={
+                  <div className="empty-state-actions">
+                    <Button tone="primary" onClick={() => scrollTo('eval-input')}>去录入</Button>
+                    <Button onClick={() => scrollTo('eval-import')}>去导入</Button>
+                    <Link className="btn" to="/model">看模型健康</Link>
+                  </div>
+                }
+              />
+            ) : (
+              <>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>问题</th>
+                      <th>期望工具</th>
+                      <th>判定</th>
+                      <th>原因</th>
+                      <th>分类</th>
+                      <th>时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(rows ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((c) => (
+                      <tr key={c.case_id}>
+                        <td className="small">{c.query}</td>
+                        <td className="small">
+                          {c.expected_tool_calls && c.expected_tool_calls.length > 0 ? (
+                            <span className="muted mono" style={{ fontSize: 11 }}>
+                              {c.expected_tool_calls.join(' → ')}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="small muted">{c.judge_type === 'llm' ? 'LLM 判定' : '关键词'}</td>
+                        <td className="small muted">{c.reason || '—'}</td>
+                        <td className="small muted">{c.category ? CATEGORY_LABELS[c.category] ?? c.category : '—'}</td>
+                        <td className="mono small muted">{fmtTime(c.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {(rows?.length ?? 0) > PAGE_SIZE && (
+                  <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+                    <Pagination current={page} pageSize={PAGE_SIZE} total={rows?.length ?? 0} onChange={setPage} />
+                  </div>
+                )}
+              </>
+            )}
+          </Card>
+
+          <Card title="运行记录" className="evaluation-history-card">
+            {runsReq.loading ? (
+              <TableSkeleton rows={3} cols={4} />
+            ) : evalRuns === null || evalRuns.length === 0 ? (
+              <EmptyState
+                title="还没有评测运行"
+                desc="到发布页对草稿跑回归评测，这里会记录每次结果，以及和上一次的通过率差值。"
+                actions={
+                  <div className="empty-state-actions">
+                    <Link className="btn primary" to="/release">去发布页跑回归</Link>
+                  </div>
+                }
+              />
+            ) : (
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>版本</th>
+                    <th className="num">通过率</th>
+                    <th className="num">对比上次</th>
+                    <th className="num">通过 / 样本</th>
+                    <th>结果</th>
+                    <th>时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evalRuns.map((r) => {
+                    const delta = r.delta
+                    const up = delta !== null && delta >= 0
+                    const deltaLabel = delta === null ? '—' : `${up ? '+' : ''}${(delta * 100).toFixed(1)}%`
+                    return (
+                      <tr key={r.id}>
+                        <td className="mono">v{r.agent_version}</td>
+                        <td className="num">{Math.round((r.pass_rate ?? 0) * 100)}%</td>
+                        <td className={`num mono ${delta === null ? '' : up ? 'eval-delta-up' : 'eval-delta-down'}`}>{deltaLabel}</td>
+                        <td className="num">{r.passed}/{r.total}</td>
+                        <td>
+                          <Badge status={r.regressed ? 'FAIL' : 'PASS'}>{r.regressed ? '退化' : '正常'}</Badge>
+                        </td>
+                        <td className="mono small muted">{fmtTime(r.created_at)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+            <p className="small muted mt">与上一次运行对比：绿色为上升，红色为下降。跑回归在发布页的回归步骤里，失败样本定位也在那里。</p>
+          </Card>
+        </div>
+
+        <div className="evaluation-rail">
+          <Card title="录入样例" id="eval-input">
+            <div className="small muted evaluation-copy">
               当前在 <b>{KIND_LABELS[kind] ?? kind}</b> 分类下录入，保存后会回到当前数据集。
             </div>
-            <Field label="数据集类型">
-              <select value={kind} onChange={(e) => setKind(e.target.value)}>
-                {KINDS.map((k) => (
-                  <option key={k} value={k}>
-                    {KIND_LABELS[k] ?? k}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="问题">
-              <textarea value={query} onChange={(e) => setQuery(e.target.value)} placeholder="评测问题 / 注入用例" />
-            </Field>
-            <Field label="原因">
-              <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="这条样例为什么重要" />
-            </Field>
-            <Field label="期望关键词（逗号分隔，可选）">
-              <input value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="42, 退款" />
-            </Field>
+            <div className="evaluation-form-grid">
+              <Field label="数据集类型">
+                <select value={kind} onChange={(e) => setKind(e.target.value)}>
+                  {KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {KIND_LABELS[k] ?? k}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="判定方式">
+                <select value={judgeType} onChange={(e) => setJudgeType(e.target.value)}>
+                  <option value="keyword">关键词匹配</option>
+                  <option value="llm">LLM 判定（需接真 LLM）</option>
+                </select>
+              </Field>
+              <Field label="问题" className="evaluation-span-2">
+                <textarea value={query} onChange={(e) => setQuery(e.target.value)} placeholder="评测问题 / 注入用例" />
+              </Field>
+              <Field label="原因" className="evaluation-span-2">
+                <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="这条样例为什么重要" />
+              </Field>
+              <Field label="期望关键词（逗号分隔，可选）" className="evaluation-span-2">
+                <input value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="42, 退款" />
+              </Field>
+            </div>
             <details className="eval-advanced">
               <summary>更多字段（高级）</summary>
               <div className="small muted eval-advanced-note">
@@ -401,25 +465,23 @@ export default function Evaluation() {
               <Field label="禁用工具（逗号分隔，可选）">
                 <input value={mustNotCall} onChange={(e) => setMustNotCall(e.target.value)} placeholder="http.get, shell.exec" />
               </Field>
-              <Field label="判定方式">
-                <select value={judgeType} onChange={(e) => setJudgeType(e.target.value)}>
-                  <option value="keyword">关键词匹配</option>
-                  <option value="llm">LLM 判定（需接真 LLM）</option>
-                </select>
-              </Field>
             </details>
             <Button tone="primary" disabled={busy || !query.trim() || !can('eval:write')} onClick={add} className="mt">
               录入样例
             </Button>
-            {msg && <div className="mt">{msg.kind === 'ok' ? <SuccessBox message={msg.text} /> : <ErrorBox message={msg.text} />}</div>}
+            
           </Card>
 
-          <Card title="种子同步">
-            <div className="small muted" style={{ marginBottom: 10 }}>
-              仅在需要批量导入时打开。来源：<code>{seedSource || '加载中…'}</code>
+          <Card title="批量导入" id="eval-import">
+            <div className="small muted evaluation-copy">
+              样本大多不是手填出来的，导入更快。来源：<code>{seedSource || '加载中…'}</code>
+            </div>
+            <div className="row mb" style={{ gap: 8 }}>
+              <Button onClick={downloadTemplate}>下载模板</Button>
+              <span className="small muted">按模板填好后粘贴到下方，保存即按 query + kind upsert。</span>
             </div>
             <details className="eval-advanced">
-              <summary>种子配置（高级）</summary>
+              <summary>导入配置（JSON）</summary>
               <div className="small muted eval-advanced-note">
                 这里按 <code>query + kind</code> upsert，同步前先确认数组内容是你想让平台长期保留的那批样例。
               </div>

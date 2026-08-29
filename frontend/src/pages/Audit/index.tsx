@@ -1,15 +1,20 @@
 import { useState } from 'react'
+import { Pagination } from '@/components/pagination'
 import { useRequest } from 'ahooks'
-import { api } from '@/api'
-import { Badge, Card, Empty, ErrorBox, fmtTime, TableSkeleton } from '@/components/ui'
+import { api } from '@/services'
+import { Badge, Card, Empty, ErrorBox, fmtTime, TableSkeleton } from '@/components'
 import { PageHeader } from '@/components/Page'
+
+const PAGE_SIZE = 10
 
 export default function Audit() {
   const [filter, setFilter] = useState('')
+  const [page, setPage] = useState(1)
   const { data, loading, error } = useRequest(() => api.audit(200))
 
   const rows = data?.rows ?? null
   const shown = (rows ?? []).filter((r) => !filter || r.action.includes(filter))
+  const pageRows = shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
     <div>
@@ -19,7 +24,7 @@ export default function Audit() {
         <div className="row mb">
           <input
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+            onChange={(e) => { setFilter(e.target.value); setPage(1) }}
             placeholder="按操作过滤（如 tool:execute）"
             style={{ maxWidth: 320 }}
           />
@@ -41,7 +46,7 @@ export default function Audit() {
               </tr>
             </thead>
             <tbody>
-              {shown.map((r) => (
+              {pageRows.map((r) => (
                 <tr key={r.id}>
                   <td className="mono small">{fmtTime(r.created_at)}</td>
                   <td className="mono small">{r.action}</td>
@@ -52,6 +57,11 @@ export default function Audit() {
               ))}
             </tbody>
           </table>
+        )}
+        {shown.length > PAGE_SIZE && (
+          <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+            <Pagination current={page} pageSize={PAGE_SIZE} total={shown.length} onChange={setPage} />
+          </div>
         )}
       </Card>
     </div>

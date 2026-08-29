@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Badge, Button, Card, Field, stateLabel } from '@/components/ui'
+import { Badge, Button, Card, Field, stateLabel } from '@/components'
 import { EmptyState } from '@/components/Page'
 import { CodeEditor } from '@/components/CodeEditor'
 
@@ -86,7 +86,7 @@ function ArgInput({ prop, value, onChange }: {
 export default function ToolDetail({ tool, args, exec, busy, onArgs, onRun, onFillSample, onReset, onCopy, onDelete }: ToolDetailProps) {
   if (!tool) {
     return (
-      <Card title="工具详情">
+      <Card title="工具详情" className="tools-panel tools-detail-panel">
         <EmptyState title="还没有选择工具" desc="从左边的工具目录选一个，这里会显示它的能力、风险和试跑入口。" />
       </Card>
     )
@@ -107,7 +107,7 @@ export default function ToolDetail({ tool, args, exec, busy, onArgs, onRun, onFi
   }
 
   return (
-    <Card title={`工具详情${tool.source ? ` · ${tool.source}` : ''}`}>
+    <Card title={`工具详情${tool.source ? ` · ${tool.source}` : ''}`} className="tools-panel tools-detail-panel">
       <div className="tool-detail-grid">
         <div className="tool-detail-row"><span className="tool-detail-label">名称</span><span className="tool-detail-value mono">{tool.ref}</span></div>
         <div className="tool-detail-row"><span className="tool-detail-label">来源</span><span className="tool-detail-value">{tool.source || '—'}</span></div>

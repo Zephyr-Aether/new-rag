@@ -1,10 +1,11 @@
 import { FormEvent, useState } from 'react'
-import { Pagination } from 'antd'
+import { Pagination } from '@/components/pagination'
 import { useRequest } from 'ahooks'
 import { Link } from 'react-router-dom'
-import { api } from '@/api'
-import { Badge, Button, Card, Empty, ErrorBox, Field, fmtCost, fmtTime, shortId, stateLabel, SuccessBox, TableSkeleton } from '@/components/ui'
+import { api } from '@/services'
+import { Badge, Button, Card, Empty, Field, fmtCost, fmtTime, shortId, stateLabel, TableSkeleton } from '@/components'
 import { PageHeader } from '@/components/Page'
+import { toast } from '@/toast'
 
 const PAGE_SIZE = 20
 const STATE_FILTERS = ['', 'COMPLETED', 'FAILED', 'PAUSED', 'UNKNOWN', 'CANCELLED', 'TIMEOUT']
@@ -13,7 +14,6 @@ export default function Runs() {
   const [input, setInput] = useState('')
   const [awaiting, setAwaiting] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [stateFilter, setStateFilter] = useState('')
   const [page, setPage] = useState(1)
 
@@ -35,15 +35,14 @@ export default function Runs() {
     e.preventDefault()
     if (!input.trim() || busy) return
     setBusy(true)
-    setMsg(null)
     try {
       const r = await api.createRun(input.trim(), awaiting)
       setInput('')
       if (awaiting) {
-        setMsg({ kind: 'ok', text: `完成：${(r.answer || '').slice(0, 60)}` })
+        toast(`完成：${(r.answer || '').slice(0, 60)}`)
       } else {
         const runId = r.run_id
-        setMsg({ kind: 'ok', text: `已入队（${shortId(runId)}），正在等待完成…` })
+        toast(`已入队（${shortId(runId)}），正在等待完成…`)
         run()
         // 轮询直到终态（最多 30s）
         const terminal = ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'UNKNOWN']
@@ -53,7 +52,7 @@ export default function Runs() {
             try {
               const detail = await api.runDetail(runId)
               if (terminal.includes(detail.run.state)) {
-                setMsg({ kind: 'ok', text: `运行 ${shortId(runId)} → ${stateLabel(detail.run.state)}` })
+                toast(`运行 ${shortId(runId)} → ${stateLabel(detail.run.state)}`)
                 run()
                 return
               }
@@ -64,14 +63,14 @@ export default function Runs() {
         })()
       }
     } catch (e) {
-      setMsg({ kind: 'err', text: (e as Error).message })
+      toast((e as Error).message, 'err')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid" style={{ gap: 16 }}>
       <PageHeader
         title="任务运行"
         desc="输入一句话触发一次 Agent 执行；同步适合快验答案，异步适合看队列轨迹和失败原因。"
@@ -140,7 +139,7 @@ export default function Runs() {
             {busy ? '执行中…' : '执行任务'}
           </Button>
         </form>
-        {msg && <div className="mt">{msg.kind === 'ok' ? <SuccessBox message={msg.text} /> : <ErrorBox message={msg.text} />}</div>}
+        
       </Card>
 
       <Card title={`任务列表（${loading ? '…' : total}）`}>
@@ -196,14 +195,13 @@ export default function Runs() {
           </table>
         )}
         {total > PAGE_SIZE && (
-          <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+          <div className="row mt" style={{ justifyContent: 'flex-end', gap: 12, alignItems: 'center' }}>
+            <span className="small muted">共 {total} 条</span>
             <Pagination
               current={page}
               pageSize={PAGE_SIZE}
               total={total}
               onChange={setPage}
-              showSizeChanger={false}
-              showTotal={(t) => `共 ${t} 条`}
             />
           </div>
         )}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, ModelConfig } from '../../api'
-import { Button, ErrorBox, Modal } from '../ui'
+import { api, ModelConfig } from '../../services'
+import { Button, ErrorBox, Modal } from '../'
 
 const LS_KEY = 'agent_platform_onboarding'
 
@@ -68,6 +68,12 @@ const TEMPLATES: Template[] = [
 // 首次价值路径：选场景 → 接模型 → 一键建库导知识 → 跑一个预设问题 → 看执行报告 → 进发布治理
 const STEP_TITLES = ['选场景', '接模型', '导入样例', '运行问题', '发布治理']
 
+function modelSummary(cfg: ModelConfig | null): string {
+  if (!cfg) return ''
+  const parts = [cfg.provider, cfg.model].filter((part): part is string => Boolean(part && part.trim()))
+  return parts.join(' · ')
+}
+
 export default function Onboarding({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [step, setStep] = useState(0)
   const [cfg, setCfg] = useState<ModelConfig | null>(null)
@@ -133,6 +139,15 @@ export default function Onboarding({ open, onClose }: { open: boolean; onClose: 
   if (!open) return null
 
   const modelReady = !!cfg && !cfg.is_mock
+  const modelLabel = modelSummary(cfg)
+  const modelDisplay = modelLabel || '真实模型'
+  const modelIntro = !cfg
+    ? '当前先用内置模拟模型，也能把整条流程走通。'
+    : cfg.is_mock
+      ? '当前先用内置模拟模型，也能把整条流程走通。'
+      : modelLabel
+        ? `当前已接入 ${modelLabel}`
+        : '当前模型配置已加载，但信息暂未完整返回。'
   function nextDisabled(): boolean {
     if (busy) return true
     if (step === 0) return !template
@@ -160,7 +175,7 @@ export default function Onboarding({ open, onClose }: { open: boolean; onClose: 
                 <span className="home-hint-kicker">这次会做什么</span>
                 <span>先选一个贴近你的场景，我们会自动创建示例知识、跑通第一次提问，再带你去看结果和发布链路。</span>
                 <span className="small muted">
-                  {modelReady ? `当前已接入 ${cfg!.provider} · ${cfg!.model}` : '当前先用内置模拟模型，也能把整条流程走通。'}
+                  {modelIntro}
                   {kbCount > 0 ? ` 你已经有 ${kbCount} 个知识库，后面可以直接接着用。` : ' 还没有知识库也没关系，我们会生成一份示例。'}
                 </span>
               </div>
@@ -186,7 +201,7 @@ export default function Onboarding({ open, onClose }: { open: boolean; onClose: 
           <div>
             {modelReady ? (
               <p style={{ color: '#16a34a' }}>
-                ✓ 已接入真实模型：<b>{cfg!.provider}</b> · <code>{cfg!.model}</code>
+                ✓ 已接入真实模型：<b>{modelDisplay}</b>
               </p>
             ) : (
               <>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { api, getToken } from '../api'
+import { api, getToken } from '../services'
 
 /** 前端权限感知：拉取当前用户生效权限与角色，can(action) 判断是否可操作（按 action 显隐/禁用按钮）。 */
+const ADMIN_KEYWORDS = ['admin', '管理员']
 export function usePermissions() {
   const [perms, setPerms] = useState<{ allowed: string[]; denied: string[] }>({ allowed: [], denied: [] })
   const [roles, setRoles] = useState<string[]>([])
@@ -35,5 +36,8 @@ export function usePermissions() {
     return perms.allowed.includes(action) || perms.allowed.includes('*')
   }
 
-  return { can, perms, roles, loading }
+  /** 是否是管理员：拥有「管理员」角色（普通用户即便继承租户级权限也不视作管理员）。 */
+  const isAdmin = roles.some((n) => ADMIN_KEYWORDS.some((k) => (n || '').toLowerCase().includes(k.toLowerCase())))
+
+  return { can, perms, roles, loading, isAdmin }
 }

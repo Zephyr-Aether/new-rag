@@ -1,7 +1,7 @@
 import { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { usePermissions } from '../../hooks/usePermissions'
-import { PageSkeleton } from '../ui'
+import { PageSkeleton } from '../'
 
 /** 管理区域判定动作：与顶栏「管理」下拉的显隐条件一致（有其一即视为管理员）。 */
 const ADMIN_ACTIONS = ['queue:ops', 'data:purge', 'policy:manage', 'config:write']

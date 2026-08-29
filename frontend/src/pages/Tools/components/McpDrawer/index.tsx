@@ -1,27 +1,30 @@
 import { useState } from 'react'
-import { Drawer } from 'antd'
-import { Badge, Button, ErrorBox, SuccessBox, TableSkeleton } from '@/components/ui'
+import { Pagination } from '@/components/pagination'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/sheet'
+import { Badge, Button, TableSkeleton } from '@/components'
 import { EmptyState } from '@/components/Page'
 import { useConfirm } from '@/components/Confirm'
-import { McpServer } from '@/api'
+import { McpServer } from '@/services'
+
+const PAGE_SIZE = 10
 
 interface McpDrawerProps {
   open: boolean
   onClose: () => void
   servers: McpServer[] | null
   busy: boolean
-  msg: { kind: 'ok' | 'err'; text: string } | null
   onAdd: (name: string, url: string, allow: string) => void
   onToggle: (name: string) => void
   onRemove: (name: string) => void
   onSave: () => void
 }
 
-export default function McpDrawer({ open, onClose, servers, busy, msg, onAdd, onToggle, onRemove, onSave }: McpDrawerProps) {
+export default function McpDrawer({ open, onClose, servers, busy, onAdd, onToggle, onRemove, onSave }: McpDrawerProps) {
   const { confirm, confirmEl } = useConfirm()
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [allow, setAllow] = useState('')
+  const [page, setPage] = useState(1)
 
   function submitAdd() {
     if (!name.trim() || !url.trim()) return
@@ -32,7 +35,12 @@ export default function McpDrawer({ open, onClose, servers, busy, msg, onAdd, on
   }
 
   return (
-    <Drawer title="接入源 · MCP" open={open} onClose={onClose} width={620}>
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="w-[620px] max-w-[620px] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>接入源 · MCP</SheetTitle>
+        </SheetHeader>
+        <div className="px-4">
       {confirmEl}
       <p className="small muted" style={{ marginTop: 0 }}>
         在这里新增、编辑 MCP 接入源。保存后自动注册，白名单先确认，避免把整站能力都暴露出去。
@@ -60,7 +68,7 @@ export default function McpDrawer({ open, onClose, servers, busy, msg, onAdd, on
             </tr>
           </thead>
           <tbody>
-            {servers.map((s) => (
+            {servers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((s) => (
               <tr key={s.name}>
                 <td className="mono small">{s.name}</td>
                 <td className="mono small muted">{s.base_url}</td>
@@ -88,10 +96,16 @@ export default function McpDrawer({ open, onClose, servers, busy, msg, onAdd, on
           </tbody>
         </table>
       )}
+      {servers !== null && servers.length > PAGE_SIZE && (
+        <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+          <Pagination current={page} pageSize={PAGE_SIZE} total={servers.length} onChange={setPage} />
+        </div>
+      )}
       <div className="row mt" style={{ gap: 8 }}>
         <Button tone="primary" disabled={busy} onClick={onSave}>{busy ? '保存中…' : '保存并热注册'}</Button>
-        {msg && (msg.kind === 'ok' ? <SuccessBox message={msg.text} /> : <ErrorBox message={msg.text} />)}
-      </div>
-    </Drawer>
+              </div>
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }

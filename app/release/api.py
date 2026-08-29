@@ -262,3 +262,108 @@ async def release_metrics(
             }
         )
     return {"agent_id": agent_id, "metrics": metrics}
+
+
+class FlowHistoryRequest(BaseModel):
+    version: int = 0
+    step: str
+    summary: str = ""
+    ok: bool = True
+    detail: str | None = None
+
+
+@router.get("/{agent_id}/flow-history")
+async def list_flow_history(
+    agent_id: str,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+    step: str | None = None,
+    limit: int = 200,
+) -> dict:
+    """发布流程执行历史（留痕），可选按 step 过滤。"""
+    state: AppState = request.app.state.agent
+    records = await state.release.list_flow_history(
+        tenant_id=subject.tenant_id,
+        agent_id=agent_id,
+        step=step,
+        limit=limit,
+    )
+    return {"agent_id": agent_id, "records": records}
+
+
+@router.post("/{agent_id}/flow-history")
+async def add_flow_history(
+    agent_id: str,
+    body: FlowHistoryRequest,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+) -> dict:
+    """记录一步发布流程执行（operator 取当前用户）。"""
+    state: AppState = request.app.state.agent
+    return await state.release.add_flow_history(
+        tenant_id=subject.tenant_id,
+        agent_id=agent_id,
+        version=body.version,
+        step=body.step,
+        operator=subject.user_id,
+        summary=body.summary,
+        ok=body.ok,
+        detail=body.detail,
+    )
+
+
+class NodeConfigRequest(BaseModel):
+    config: dict = Field(default_factory=dict)
+    status: str | None = None  # 可选：同步更新当前阶段标识
+
+
+@router.get("/{agent_id}/release-flow")
+async def get_release_flow(
+    agent_id: str,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+) -> dict:
+    """发布流配置：5 节点（code/name/config）+ 当前阶段 status + 是否终止。"""
+    state: AppState = request.app.state.agent
+    return await state.release.get_flow_config(tenant_id=subject.tenant_id, agent_id=agent_id)
+
+
+@router.post("/{agent_id}/release-flow/start")
+async def start_release_flow(
+    agent_id: str,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+) -> dict:
+    """开启新的发布流：清空节点 config、重置阶段并解除终止。"""
+    state: AppState = request.app.state.agent
+    return await state.release.start_flow(tenant_id=subject.tenant_id, agent_id=agent_id)
+
+
+@router.post("/{agent_id}/release-flow/terminate")
+async def terminate_release_flow(
+    agent_id: str,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+) -> dict:
+    """随时终止发布流。"""
+    state: AppState = request.app.state.agent
+    return await state.release.terminate_flow(tenant_id=subject.tenant_id, agent_id=agent_id)
+
+
+@router.post("/{agent_id}/release-flow/{node_code}")
+async def save_release_flow_node(
+    agent_id: str,
+    node_code: str,
+    body: NodeConfigRequest,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+) -> dict:
+    """保存某节点的 config（前端回显）；可选同步当前阶段标识。"""
+    state: AppState = request.app.state.agent
+    if body.status:
+        await state.release.save_flow_status(
+            tenant_id=subject.tenant_id, agent_id=agent_id, status=body.status
+        )
+    return await state.release.save_node_config(
+        tenant_id=subject.tenant_id, agent_id=agent_id, node_code=node_code, config=body.config
+    )

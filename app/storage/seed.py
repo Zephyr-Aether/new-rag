@@ -5,8 +5,16 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.storage.models import AgentRow, AgentVersionRow, PolicyRow, TenantRow, UserRow
 from app.gateway.passwords import client_sha256, hash_password
+from app.storage.models import (
+    AgentRow,
+    AgentVersionRow,
+    PolicyRow,
+    RoleRow,
+    TenantRow,
+    UserRoleRow,
+    UserRow,
+)
 
 # 默认种子用户密码（客户端传输时先 SHA-256）
 DEFAULT_PASSWORD = "admin123"
@@ -60,6 +68,32 @@ async def seed_defaults(session: AsyncSession, tenant_id: str, user_id: str) -> 
                 email=f"{user_id}@local",
                 display_name="Default User",
                 password_hash=hash_password(client_sha256(DEFAULT_PASSWORD)),
+            )
+        )
+
+    # 管理员角色 + 绑定种子用户：前端据此识别「管理员」，普通用户不落入管理菜单
+    admin_role = await session.scalar(
+        select(RoleRow).where(RoleRow.tenant_id == tenant_id, RoleRow.name == "管理员")
+    )
+    if admin_role is None:
+        admin_role = RoleRow(
+            id=_uid("role"),
+            tenant_id=tenant_id,
+            name="管理员",
+            description="平台管理员：用户/策略/配置/队列等治理能力",
+        )
+        session.add(admin_role)
+        await session.flush()
+    binding = await session.scalar(
+        select(UserRoleRow).where(UserRoleRow.user_id == user_id, UserRoleRow.role_id == admin_role.id)
+    )
+    if binding is None:
+        session.add(
+            UserRoleRow(
+                id=_uid("ur"),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                role_id=admin_role.id,
             )
         )
 

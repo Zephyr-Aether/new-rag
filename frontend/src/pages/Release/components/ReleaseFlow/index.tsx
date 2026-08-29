@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, CanaryCheck, ContractCheck, Regression, Version } from '@/api'
-import { Badge, Button, Card, Field, fmtTime } from '@/components/ui'
-import { getLoginDraft } from '@/util/loginDraft'
+import { api, CanaryCheck, ContractCheck, Regression, Version } from '@/services'
+import { Badge, Button, Card, Field, fmtTime } from '@/components'
+import { Steps } from 'antd'
+import { useConfirm } from '@/components/Confirm'
+import { getLoginDraft } from '@/util'
+import { toast } from '@/toast'
 
 type StepKey = 'draft' | 'contract' | 'regression' | 'gray' | 'release'
 
@@ -22,23 +25,15 @@ const STEPS: { key: StepKey; title: string; lockedHint: string }[] = [
   { key: 'release', title: '全量上线 / 回滚', lockedHint: '需先进入灰度' },
 ]
 
-const HIST_KEY = 'release_flow_history_v1'
-const POLL_MS = 8000
+const STEP_KEYS: StepKey[] = ['draft', 'contract', 'regression', 'gray', 'release']
 
-function loadHistory(): Partial<Record<StepKey, Exec[]>> {
-  try {
-    return JSON.parse(localStorage.getItem(HIST_KEY) || '{}')
-  } catch {
-    return {}
-  }
+/** 发布流阶段标识 → 中文。 */
+const STATUS_LABEL: Record<string, string> = {
+  empty: '尚未开始', draft: '草稿待验证', contract: '契约检查中', regression: '回归评测中',
+  gray: '灰度放量中', release: '放量决策', done: '已上线', disabled: '已停用', terminated: '已终止',
 }
-function saveHistory(h: Partial<Record<StepKey, Exec[]>>) {
-  try {
-    localStorage.setItem(HIST_KEY, JSON.stringify(h))
-  } catch {
-    /* ignore */
-  }
-}
+
+const POLL_MS = 8000
 
 interface ReleaseFlowProps {
   agentId: string
@@ -77,6 +72,7 @@ export default function ReleaseFlow({
   onRollback,
   onHalt,
 }: ReleaseFlowProps) {
+  const { confirm, confirmEl } = useConfirm()
   const pl = versions
   const latest = pl[0]
   const draft = latest?.status === 'DRAFT' ? latest : null
@@ -87,16 +83,59 @@ export default function ReleaseFlow({
 
   // —— 展示步骤 + 通过标记 + 历史 ——
   const [viewStep, setViewStep] = useState(0)
+  const [newCycle, setNewCycle] = useState(false)
   const [passedContract, setPassedContract] = useState(false)
   const [passedRegression, setPassedRegression] = useState(false)
-  const [history, setHistory] = useState<Partial<Record<StepKey, Exec[]>>>(loadHistory)
+  const [history, setHistory] = useState<Partial<Record<StepKey, Exec[]>>>({})
   const latestDraftRef = useRef(latest?.version ?? -1)
   const prevLatestRef = useRef<string | undefined>(undefined)
 
-  /** 当前该操作的步骤：无版本→草稿；有草稿→契约(过→回归→灰度)；灰/上线→放量决策。 */
-  const autoStep = !latest ? 0 : latest.status === 'DRAFT' ? (passedRegression ? 3 : passedContract ? 2 : 1) : 4
-  /** 流程是否已全部走通（上线且无待办）：完成态只读，但可回看全部步骤。 */
+  // —— 发布流配置（后端下发）：5 节点 code/name + 每节点 config 回显 + 阶段/终止标识 ——
+  const [flow, setFlow] = useState<{ status: string; terminated: boolean; nodes: { code: string; name: string; config: Record<string, unknown> }[] } | null>(null)
+  useEffect(() => {
+    if (!agentId) return
+    api.releaseFlow(agentId).then(setFlow).catch(() => undefined)
+  }, [agentId])
+  const nodeNameByCode = useMemo(() => Object.fromEntries((flow?.nodes ?? []).map((n) => [n.code, n.name])), [flow])
+  const flowTerminated = !!flow?.terminated
+  const flowActive = !!flow && ['draft','contract','regression','gray','release'].includes(flow.status)
+  const flowDraftCfg = (flow?.nodes.find((n) => n.code === 'draft')?.config ?? {}) as Record<string, unknown>
+  function saveNode(code: string, config: Record<string, unknown>, status?: string) {
+    api.releaseFlowNode(agentId, code, config, status).catch(() => undefined)
+    setFlow((prev) => {
+      if (!prev) return prev
+      return { ...prev, status: status ?? prev.status, nodes: prev.nodes.map((n) => (n.code === code ? { ...n, config } : n)) }
+    })
+  }
+  async function onTerminate() {
+    await api.releaseFlowTerminate(agentId)
+    setFlow((prev) => (prev ? { ...prev, status: 'terminated', terminated: true } : prev))
+  }
+
+  /** 开启新发布流：后端重置节点 config / 阶段，再回到草稿步创建新版本。 */
+  async function startNewFlow() {
+    try {
+      const fresh = await api.releaseFlowStart(agentId)
+      setFlow(fresh)
+      setNewCycle(true)
+      setViewStep(0)
+      onChanged()
+    } catch (e) {
+      toast((e as Error).message, 'err')
+    }
+  }
+
+  /** 当前该操作的步骤：优先用后端下发的 current_step/status，未加载时本地推导。 */
+  const localAuto = !latest ? 0 : latest.status === 'DRAFT' ? (passedRegression ? 3 : passedContract ? 2 : 1) : 4
+  const FLOW_STEP: Record<string, number> = { empty: 0, draft: 1, contract: 1, regression: 2, gray: 3, release: 4, done: 4, disabled: 4 }
+  const flowStep = flow && !flow.terminated ? (FLOW_STEP[flow.status] ?? 0) : null
+  const autoStep = flowStep ?? localAuto
+  /** 流程是否已全部走通（上线且无待办）：完成态只读、停止轮询，可回看全部步骤。 */
   const flowComplete = hasActive && !draft && !hasGray
+  /** 是否有进行中的发布流（有版本且未全走完）：仅在此时轮询。 */
+  const inProgress = pl.length > 0 && !flowComplete
+  /** 完成态下是否仍想查看（未点「开启新变更」）：此时所有步骤只读。 */
+  const viewOnly = (flowComplete && !newCycle) || flowTerminated
 
   // 自动跟随推进：完成一步后，展示自动落到下一步
   useEffect(() => {
@@ -105,12 +144,32 @@ export default function ReleaseFlow({
 
   function record(key: StepKey, summary: string, ok: boolean, detail?: string) {
     const rec: Exec = { ts: new Date().toISOString(), operator: getLoginDraft().user || '—', summary, ok, detail }
-    setHistory((prev) => {
-      const next = { ...prev, [key]: [rec, ...(prev[key] ?? [])].slice(0, 3) }
-      saveHistory(next)
-      return next
-    })
+    setHistory((prev) => ({ ...prev, [key]: [rec, ...(prev[key] ?? [])].slice(0, 3) }))
+    // 留痕入库：失败也不阻塞流程
+    api.releaseFlowRecord(agentId, { version: latest?.version ?? 0, step: key, summary, ok, detail }).catch(() => undefined)
   }
+
+  // 进入页面拉取发布流程历史（数据库）
+  useEffect(() => {
+    let alive = true
+    api
+      .releaseFlowHistory(agentId)
+      .then((r) => {
+        if (!alive) return
+        const grouped: Partial<Record<StepKey, Exec[]>> = {}
+        for (const rec of r.records) {
+          const key = rec.step as StepKey
+          if (!STEP_KEYS.includes(key)) continue
+          grouped[key] = [...(grouped[key] ?? []), { ts: rec.created_at ?? '', operator: rec.operator, summary: rec.summary, ok: rec.ok, detail: rec.detail ?? undefined }]
+        }
+        for (const k of Object.keys(grouped)) grouped[k as StepKey] = (grouped[k as StepKey] ?? []).slice(0, 3)
+        setHistory(grouped)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [agentId])
 
   // 状态型动作（创建/灰度/发布）靠 refresh 带来的版本变化推进 + 留痕
   useEffect(() => {
@@ -128,8 +187,8 @@ export default function ReleaseFlow({
       return
     }
     if (prevStatus && prevStatus !== latest.status) {
-      if (latest.status === 'GRAY') record('gray', `灰度放量 v${latest.version}`, true)
-      else if (latest.status === 'ACTIVE') record('release', `全量上线 v${latest.version}`, true)
+      if (latest.status === 'GRAY') { record('gray', `灰度放量 v${latest.version}`, true); saveNode('gray', { version: latest.version }, 'release') }
+      else if (latest.status === 'ACTIVE') { record('release', `全量上线 v${latest.version}`, true); saveNode('release', { version: latest.version }, 'done') }
       else if (latest.status === 'DISABLED') record('release', `停用 / 回滚 v${latest.version}`, true)
     }
     setViewStep((prev) => Math.max(prev, latest.status === 'DRAFT' ? 1 : 4))
@@ -143,6 +202,7 @@ export default function ReleaseFlow({
     const failed = contractFor.data.checks.filter((c) => c.status === 'fail').length
     setPassedContract(!contractFor.data.blocked)
     record('contract', `v${contractFor.version} 契约检查：${passed} 通过 / ${failed} 失败`, !contractFor.data.blocked, contractFor.data.checks.filter((c) => c.status !== 'pass').map((c) => `${c.id}: ${c.reason}`).join('；') || undefined)
+    saveNode('contract', { total: contractFor.data.checks.length, passed, failed }, contractFor.data.blocked ? 'contract' : 'regression')
     if (!contractFor.data.blocked) setViewStep((prev) => Math.max(prev, 2))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contractFor])
@@ -153,6 +213,7 @@ export default function ReleaseFlow({
     const word = regFor.data.regressed ? (delta !== null && delta < -10 ? '明显退化' : '轻微退化') : '未退化'
     setPassedRegression(!regFor.data.regressed)
     record('regression', `v${regFor.version} 回归：通过率 ${rate.toFixed(0)}% · ${word}`, !regFor.data.regressed)
+    saveNode('regression', { pass_rate: regFor.data.pass_rate, regressed: regFor.data.regressed }, regFor.data.regressed ? 'regression' : 'gray')
     if (!regFor.data.regressed) setViewStep((prev) => Math.max(prev, 3))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regFor])
@@ -182,20 +243,21 @@ export default function ReleaseFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId, gray?.version])
 
-  // 版本轮询：实时刷新发布状态（版本目录/流水线）
+  // 版本轮询：仅在有进行中的发布流时轮询；无版本 / 全走完时停止
   useEffect(() => {
+    if (!inProgress) return
     const timer = setInterval(() => onChanged(), POLL_MS)
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [inProgress])
 
   // —— 步骤状态 ——
   const doneMap: Record<StepKey, boolean> = {
-    draft: pl.length > 0,
-    contract: hasGray || hasActive || passedContract,
-    regression: hasGray || hasActive || passedRegression,
-    gray: hasGray,
-    release: hasActive,
+    draft: flowStep != null ? flowStep > 0 : pl.length > 0,
+    contract: flowStep != null ? flowStep > 1 : (latest ? (latest.status === 'DRAFT' ? passedContract : true) : false),
+    regression: flowStep != null ? flowStep > 2 : (latest ? (latest.status === 'DRAFT' ? passedRegression : true) : false),
+    gray: flowStep != null ? flowStep > 3 : (latest ? (latest.status === 'GRAY' || latest.status === 'ACTIVE') : false),
+    release: flowStep != null ? flowStep >= 4 : (latest ? latest.status === 'ACTIVE' : false),
   }
   const failedMap: Record<StepKey, boolean> = {
     draft: false,
@@ -205,16 +267,17 @@ export default function ReleaseFlow({
     release: false,
   }
 
-  /** 门禁：上一步没做完，不能切到下一步；完成态可自由回看。 */
+  /** 门禁：上一步没做完，不能切到下一步；完成态可自由回看；新循环只能停在草稿步。 */
   function canSelect(i: number) {
-    if (flowComplete) return true
-    if (i === 0) return true
-    return i <= autoStep || doneMap[STEPS[i - 1].key]
+    // 整个流程结束（完成/终止）：所有节点可点；进行中：只能点当前节点及之前的节点
+    if (viewOnly) return true
+    return i <= autoStep
   }
 
-  /** 该步骤是否可以操作（否则只读）：仅当前该做的一步可操作；完成态只允许在草稿步开新版本。 */
+  /** 该步骤是否可以操作（否则只读）：仅当前该做的一步可操作；完成态全只读，新循环仅草稿步可编辑。 */
   function operable(i: number) {
-    if (flowComplete) return i === 0
+    if (viewOnly) return false
+    if (flowComplete && newCycle) return i === 0
     return i === autoStep && !doneMap[STEPS[i].key]
   }
 
@@ -228,6 +291,13 @@ export default function ReleaseFlow({
   const [tools, setTools] = useState('calc.add')
   const [kv, setKv] = useState('0')
   const latestDraftConfig = pl.find((v) => v.status === 'DRAFT')?.config
+  /** 只读态展示用：优先用后端回显的 draft 节点 config，兜底取最新版本。 */
+  const viewConfig = {
+    prompt: String(flowDraftCfg.system_prompt ?? pl[0]?.config?.system_prompt ?? ''),
+    model: String(flowDraftCfg.model ?? pl[0]?.config?.model ?? ''),
+    tools: Array.isArray(flowDraftCfg.tools) ? (flowDraftCfg.tools as string[]).join(', ') : (Array.isArray(pl[0]?.config?.tools) ? (pl[0].config.tools as string[]).join(', ') : '—'),
+    kv: String(flowDraftCfg.knowledge_version ?? pl[0]?.config?.knowledge_version ?? '—'),
+  }
   function importLastConfig() {
     const cfg = latestDraftConfig ?? pl.find((v) => v.status !== 'DRAFT')?.config
     if (!cfg) return
@@ -249,6 +319,7 @@ export default function ReleaseFlow({
       model: model.trim() || undefined,
       config: { tools: tools.split(',').map((s) => s.trim()).filter(Boolean), knowledge_version: kv.trim() || '0' },
     })
+    saveNode('draft', { system_prompt: prompt.trim(), model: model.trim(), tools, kv: kv.trim() || '0' }, 'contract')
   }
 
   const contractSummary = contractFor
@@ -261,7 +332,8 @@ export default function ReleaseFlow({
     : null
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid" style={{ gap: 16 }}>
+      {confirmEl}
       {/* 版本摘要条 */}
       <Card>
         <div className="release-summary">
@@ -286,42 +358,54 @@ export default function ReleaseFlow({
             <span className="release-summary-value">默认</span>
           </div>
         </div>
+        {flow && (
+          <div className="release-stage-row">
+            <span className="release-stage-label">当前阶段</span>
+            <Badge status={flow.terminated ? 'FAIL' : 'OK'}>{STATUS_LABEL[flow.status] ?? flow.status}</Badge>
+            {flowActive && (
+              <Button
+                tone="danger"
+                onClick={() => confirm('终止发布', '确定终止当前发布流吗？之后所有步骤只能查看，不能继续操作。', () => void onTerminate(), { danger: true, confirmText: '终止' })}
+              >
+                终止发布
+              </Button>
+            )}
+          </div>
+        )}
+        {flowTerminated && (
+          <div className="release-terminated-banner">该发布流已终止，所有步骤仅可查看，无法继续操作。如需重新发布，请创建新版本或联系管理员恢复。</div>
+        )}
         {flowComplete && (
           <div className="release-complete-banner">
-            该发布流程已全部完成，下方步骤仅可查看。
-            <Button onClick={() => setViewStep(0)}>开启新变更</Button>
+            {newCycle ? (
+              '正在开启新变更：从草稿步开始，创建后会推进到契约检查。'
+            ) : (
+              '该发布流程已全部完成，下方步骤仅可查看（已停止刷新）。如需开启新变更，请到「全量上线 / 回滚」节点点「创建新版本」。'
+            )}
           </div>
         )}
       </Card>
 
-      {/* 横向步骤条 */}
-      <div className="release-steps">
-        {STEPS.map((s, i) => {
+      {/* 横向步骤条（antd Steps） */}
+      <Steps
+        size="small"
+        current={autoStep}
+        onChange={(i) => canSelect(i) && setViewStep(i)}
+        items={STEPS.map((s, i) => {
           const done = doneMap[s.key]
           const failed = failedMap[s.key]
-          const isCurrent = i === autoStep && !done
-          const isViewing = i === viewStep
-          const locked = !canSelect(i)
-          return (
-            <button
-              key={s.key}
-              type="button"
-              className={`release-step${done ? ' done' : ''}${failed ? ' failed' : ''}${isCurrent ? ' current' : ''}${isViewing ? ' viewing' : ''}${locked ? ' locked' : ''}`}
-              onClick={() => canSelect(i) && setViewStep(i)}
-              title={locked ? s.lockedHint : undefined}
-            >
-              <span className="release-step-dot">{done ? '✓' : failed ? '✗' : i + 1}</span>
-              <span className="release-step-name">{s.title}</span>
-              {locked && <span className="release-step-lock">🔒</span>}
-            </button>
-          )
+          return {
+            title: nodeNameByCode[s.key] ?? s.title,
+            status: failed ? 'error' : done ? 'finish' : i === autoStep ? 'process' : 'wait',
+            description: failed ? s.lockedHint : undefined,
+          }
         })}
-      </div>
+      />
 
       {/* 主内容 + 侧栏 */}
       <div className="release-layout">
         <div className="release-content">
-          <Card title={`${cur.title}${latest && viewStep !== 0 ? ` · v${latest.version}` : ''}`}>
+          <Card title={`${nodeNameByCode[cur.key] ?? cur.title}${latest && viewStep !== 0 ? ` · v${latest.version}` : ''}`}>
             {readOnly && (
               <div className="release-readonly-hint">只读：{cur.title} {doneMap[cur.key] ? '已完成' : '等待前置步骤'}，仅可查看结果与历史。</div>
             )}
@@ -329,17 +413,17 @@ export default function ReleaseFlow({
             {viewStep === 0 && (
               <div className="release-draft-form">
                 <Field label="系统提示词">
-                  <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="新的系统提示词" style={{ minHeight: 90 }} disabled={readOnly} />
+                  <textarea value={readOnly ? viewConfig.prompt : prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="新的系统提示词" style={{ minHeight: 90 }} disabled={readOnly} />
                 </Field>
                 <div className="grid cols-3" style={{ gap: 12 }}>
                   <Field label="模型">
-                    <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="默认回落" disabled={readOnly} />
+                    <input value={readOnly ? viewConfig.model : model} onChange={(e) => setModel(e.target.value)} placeholder="默认回落" disabled={readOnly} />
                   </Field>
                   <Field label="工具集（逗号分隔）">
-                    <input value={tools} onChange={(e) => setTools(e.target.value)} disabled={readOnly} />
+                    <input value={readOnly ? viewConfig.tools : tools} onChange={(e) => setTools(e.target.value)} disabled={readOnly} />
                   </Field>
                   <Field label="knowledge_version">
-                    <input value={kv} onChange={(e) => setKv(e.target.value)} disabled={readOnly} />
+                    <input value={readOnly ? viewConfig.kv : kv} onChange={(e) => setKv(e.target.value)} disabled={readOnly} />
                   </Field>
                 </div>
                 {!readOnly && (
@@ -362,7 +446,7 @@ export default function ReleaseFlow({
                 </p>
                 {!readOnly && (
                   <div className="row" style={{ gap: 8 }}>
-                    <Button tone="primary" disabled={!!busy || !draft || !canPublish} onClick={() => draft && onRunContract(draft.version)}>
+                    <Button tone="primary" disabled={!!busy || !draft} onClick={() => draft && onRunContract(draft.version)}>
                       运行契约检查
                     </Button>
                     {draft && <Button disabled={!!busy} onClick={() => onRunContract(draft.version)}>重试</Button>}
@@ -389,7 +473,7 @@ export default function ReleaseFlow({
                 </p>
                 {!readOnly && (
                   <div className="row" style={{ gap: 8 }}>
-                    <Button tone="primary" disabled={!!busy || !draft || !canPublish} onClick={() => draft && onRunRegression(draft.version)}>
+                    <Button tone="primary" disabled={!!busy || !draft} onClick={() => draft && onRunRegression(draft.version)}>
                       {busy === `reg-${draft?.version}` ? '回归中…' : '运行回归'}
                     </Button>
                     {regFor && <Button onClick={onOpenWizard}>查看评测明细</Button>}
@@ -408,7 +492,7 @@ export default function ReleaseFlow({
                 </p>
                 {!readOnly && (
                   <div className="row" style={{ gap: 8 }}>
-                    <Button tone="primary" disabled={!!busy || !draft || !canPublish} onClick={() => draft && onGray(draft.version)}>
+                    <Button tone="primary" disabled={!!busy || !draft} onClick={() => draft && onGray(draft.version)}>
                       开始灰度
                     </Button>
                     {gray && <Button disabled={canaryBusy || !!busy} onClick={() => onRunCanary(gray.version)}>刷新 Canary</Button>}
@@ -444,7 +528,7 @@ export default function ReleaseFlow({
                 )}
                 {readOnly && active && (
                   <div className="row" style={{ gap: 8 }}>
-                    <Button onClick={() => setViewStep(0)}>创建新版本</Button>
+                    <Button onClick={() => void startNewFlow()}>创建新版本</Button>
                   </div>
                 )}
                 <p className="small muted mt">全量发布 / 回滚 / 暂停都会二次确认，不会一键直出。</p>
@@ -457,7 +541,7 @@ export default function ReleaseFlow({
           </Card>
 
           {/* 执行结果与历史 */}
-          <Card title="执行结果与历史">
+          <Card title="执行结果与历史" className="release-history-card">
             {histForStep.length === 0 ? (
               <p className="small muted">这一步还没有执行记录。</p>
             ) : (

@@ -1,4 +1,4 @@
-import { DEMO_LOGIN } from '@/constants/product'
+import { DEMO_LOGIN } from '@/constants'
 
 const LAST_LOGIN_TENANT_KEY = 'agent_platform_last_login_tenant'
 const LAST_LOGIN_USER_KEY = 'agent_platform_last_login_user'

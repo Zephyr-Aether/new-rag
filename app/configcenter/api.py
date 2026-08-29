@@ -8,7 +8,7 @@ GET  /flags/{key}        判断 Flag 是否放量
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from app.common.contracts import Subject
@@ -68,6 +68,22 @@ async def get_config_version(
         tenant_id=state.seed["tenant_id"], scope=scope, scope_id=scope_id, key=key, version=version
     )
     return row or {"key": key, "value": None, "version": None}
+
+
+@router.get("/config/{key}/versions")
+async def list_config_versions(
+    key: str,
+    request: Request,
+    scope: str = "GLOBAL",
+    scope_id: str = "",
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    """该 key 的版本历史（按 version 倒序），供配置页展示与回滚。"""
+    state: AppState = request.app.state.agent
+    versions = await state.config_service.list_versions(
+        tenant_id=state.seed["tenant_id"], scope=scope, scope_id=scope_id, key=key, limit=limit
+    )
+    return {"key": key, "versions": versions}
 
 
 @router.post("/flags")

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { api, HealthHA, Meta, ModelConfig, Run, Version } from '@/api'
-import { Badge, Card, fmtTime, shortId, stateLabel } from '@/components/ui'
+import { api, HealthHA, Meta, ModelConfig, Run, Version } from '@/services'
+import { Badge, Card, fmtTime, shortId, stateLabel } from '@/components'
 import { PageHeader } from '@/components/Page'
 import { ArrowRight, Database, FileText, Rocket, Server, SquareActivity } from 'lucide-react'
 
@@ -143,7 +143,7 @@ export default function Dashboard() {
   const canStart = platformReady && kbReady && (modelReady || cfg?.is_mock)
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid" style={{ gap: 16 }}>
       <PageHeader
         title="首页"
         desc="这里只保留最关键的事：你现在该做哪一步，平台最近发生了什么。主线仍然是接模型、导知识、对话验证、评测门禁、发布。"

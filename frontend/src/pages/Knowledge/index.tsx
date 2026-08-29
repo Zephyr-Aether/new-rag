@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Link } from 'react-router-dom'
-import { Drawer, Progress, Upload } from 'antd'
+import { Progress, Upload } from 'antd'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/sheet'
 import { ChevronDown, Trash2 } from 'lucide-react'
-import { api, KbBase, KBHit, KBSearch, MAX_UPLOAD_BYTES } from '@/api'
-import { Badge, Button, Card, Empty, ErrorBox, Field, fmtTime, Loading, Modal, stateLabel, SuccessBox, TableSkeleton } from '@/components/ui'
+import { api, KbBase, KBHit, KBSearch, MAX_UPLOAD_BYTES } from '@/services'
+import { Badge, Button, Card, Empty, ErrorBox, Field, fmtTime, Loading, Modal, stateLabel, SuccessBox, TableSkeleton } from '@/components'
 import { EmptyState, FlowChain, PageHeader } from '@/components/Page'
 import { useConfirm } from '@/components/Confirm'
 import { usePermissions } from '@/hooks/usePermissions'
@@ -209,7 +210,7 @@ export default function Knowledge() {
   const visibleProvenance = result?.provenance.map((p) => p.trim()).filter(Boolean) ?? []
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid" style={{ gap: 16 }}>
       {confirmEl}
       <FlowChain current="knowledge" />
       <PageHeader
@@ -457,7 +458,12 @@ export default function Knowledge() {
         </>
       )}
 
-      <Drawer title="新建知识库" open={newKbOpen} onClose={() => setNewKbOpen(false)} width={440}>
+      <Sheet open={newKbOpen} onOpenChange={(o) => !o && setNewKbOpen(false)}>
+      <SheetContent side="right" className="w-[440px] max-w-[440px] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>新建知识库</SheetTitle>
+        </SheetHeader>
+        <div className="px-4">
         <Field label="名称">
           <input value={newKbName} onChange={(e) => setNewKbName(e.target.value)} placeholder="如：产品手册" autoFocus />
         </Field>
@@ -468,9 +474,16 @@ export default function Knowledge() {
           <Button tone="primary" disabled={!newKbName.trim()} onClick={createKb}>创建</Button>
           <Button onClick={() => setNewKbOpen(false)}>取消</Button>
         </div>
-      </Drawer>
+              </div>
+      </SheetContent>
+    </Sheet>
 
-      <Drawer title="导入文档" open={importOpen} onClose={() => setImportOpen(false)} width={560}>
+      <Sheet open={importOpen} onOpenChange={(o) => !o && setImportOpen(false)}>
+      <SheetContent side="right" className="w-[560px] max-w-[560px] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>导入文档</SheetTitle>
+        </SheetHeader>
+        <div className="px-4">
           <div className="mb" style={{ fontWeight: 600 }}>手动录入（Markdown）</div>
           <Field label="文档ID">
             <input value={docId} onChange={(e) => setDocId(e.target.value)} placeholder="doc-1" />
@@ -545,7 +558,9 @@ export default function Knowledge() {
             )}
             {upMsg && <div className="mt">{upMsg.kind === 'ok' ? <SuccessBox message={upMsg.text} /> : <ErrorBox message={upMsg.text} />}</div>}
           </div>
-      </Drawer>
+              </div>
+      </SheetContent>
+    </Sheet>
 
       {view && (
         <Modal

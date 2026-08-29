@@ -1,7 +1,7 @@
 import { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useRequest } from 'ahooks'
-import { Button } from '../ui'
+import { Button } from '../'
 
 /** 主流程五步：接模型 → 导知识 → 对话验证 → 评测门禁 → 发布，全线页面共用同一叙事。 */
 export const FLOW_STEPS = [
@@ -17,20 +17,22 @@ export function FlowChain({ current }: { current: string }) {
   const idx = FLOW_STEPS.findIndex((s) => s.key === current)
   const next = FLOW_STEPS[idx + 1]
   return (
-    <div className="flow-chain">
-      <div className="flow-chain-steps">
-        {FLOW_STEPS.map((s, i) => (
-          <Link key={s.key} to={s.to} className={`flow-chain-step${i === idx ? ' cur' : ''}`}>
-            <span className="flow-chain-dot">{i + 1}</span>
-            <span>{s.role}</span>
+    <div className="flow-chain-sticky">
+      <div className="flow-chain">
+        <div className="flow-chain-steps">
+          {FLOW_STEPS.map((s, i) => (
+            <Link key={s.key} to={s.to} className={`flow-chain-step${i === idx ? ' cur' : ''}`}>
+              <span className="flow-chain-dot">{i + 1}</span>
+              <span>{s.role}</span>
+            </Link>
+          ))}
+        </div>
+        {next && (
+          <Link className="flow-chain-next" to={next.to}>
+            下一步：{next.role} →
           </Link>
-        ))}
+        )}
       </div>
-      {next && (
-        <Link className="flow-chain-next" to={next.to}>
-          下一步：{next.role} →
-        </Link>
-      )}
     </div>
   )
 }

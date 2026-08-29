@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { Badge, Button, Modal } from '@/components/ui'
-import { fmtCost } from '@/components/ui'
-import { CanaryCheck } from '@/api'
+import { Badge, Button, Modal } from '@/components'
+import { fmtCost } from '@/components'
+import { CanaryCheck } from '@/services'
 
 export default function CanaryModal({
   version,

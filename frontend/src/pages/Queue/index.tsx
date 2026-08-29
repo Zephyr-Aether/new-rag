@@ -1,23 +1,31 @@
 import { useState } from 'react'
+import { Pagination } from '@/components/pagination'
 import { useRequest } from 'ahooks'
-import { api } from '@/api'
-import { Badge, Button, Card, Empty, ErrorBox, Loading, Modal, TableSkeleton, fmtTime, shortId, stateLabel } from '@/components/ui'
-import { PageHeader } from '@/components/Page'
+import { api } from '@/services'
+import { Badge, Button, Card, Empty, ErrorBox, Loading, Modal, TableSkeleton, fmtTime, shortId, stateLabel } from '@/components'
+import { EmptyState, PageHeader } from '@/components/Page'
 import { useConfirm } from '@/components/Confirm'
 
+const PAGE_SIZE = 10
 const STATES = ['', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'DEAD_LETTER', 'CANCELLED', 'EXPIRED']
 
 export default function Queue() {
   const { confirm, confirmEl } = useConfirm()
   const [state, setState] = useState('')
+  const [page, setPage] = useState(1)
   const { data, loading, error, run } = useRequest((st: string) => api.jobs(st), { defaultParams: [''] as [string] })
   const rows = data?.rows ?? null
+  const pagerTotal = rows?.length ?? 0
   const [err, setErr] = useState('') // 操作（重放/取消/清理）错误
   const [busy, setBusy] = useState('')
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null)
   const [detailBusy, setDetailBusy] = useState(false)
 
   const { data: stats, refresh: refreshStats } = useRequest(() => api.queueStats())
+  const depthSeries = stats?.depth ?? []
+  const trendSeries = stats?.trend ?? []
+  const queueSeries = depthSeries.some((d) => d.count > 0) ? depthSeries : trendSeries
+  const hasQueueSeries = queueSeries.some((d) => d.count > 0)
 
   async function openDetail(id: string) {
     setDetailBusy(true)
@@ -106,26 +114,38 @@ export default function Queue() {
               ))}
             </div>
             <div className="small muted" style={{ marginBottom: 6 }}>
-              {stats.depth && stats.depth.some((d) => d.count > 0) ? '任务队列深度（近 24 小时采样，悬停查看）' : '近 24 小时任务创建量（采样中，悬停查看）'}
+              {hasQueueSeries ? '任务队列深度（近 24 小时采样，悬停查看）' : '近 24 小时任务创建量（暂无采样数据）'}
             </div>
-            <div className="row" style={{ alignItems: 'flex-end', gap: 2, height: 84 }}>
-              {(() => {
-                const depth = stats.depth && stats.depth.some((d) => d.count > 0) ? stats.depth : stats.trend
-                const max = Math.max(1, ...depth.map((t) => t.count))
-                return depth.map((t) => {
-                  const h = Math.round((t.count / max) * 70)
-                  return (
-                    <div
-                      key={t.hours_ago}
-                      title={`${t.hours_ago}小时前：${t.count} 个`}
-                      style={{
-                        flex: 1, height: `${h}px`, background: 'var(--primary)',
-                        borderRadius: '2px 2px 0 0', opacity: t.count ? 1 : 0.15,
-                      }}
-                    />
-                  )
-                })
-              })()}
+            <div className="queue-chart">
+              {hasQueueSeries ? (
+                <div className="row queue-chart-bars" style={{ alignItems: 'flex-end', gap: 2 }}>
+                  {queueSeries.map((t) => {
+                    const max = Math.max(1, ...queueSeries.map((item) => item.count))
+                    const h = Math.round((t.count / max) * 70)
+                    return (
+                      <div
+                        key={t.hours_ago}
+                        title={`${t.hours_ago}小时前：${t.count} 个`}
+                        style={{
+                          flex: 1,
+                          height: `${h}px`,
+                          background: 'var(--primary)',
+                          borderRadius: '2px 2px 0 0',
+                          opacity: t.count ? 1 : 0.15,
+                        }}
+                      />
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="queue-chart-empty">
+                  <EmptyState
+                    title="暂无采样数据"
+                    desc="先点击右侧「手动采样」，或者等待后台定时采样完成后，这里会自动展示近 24 小时的任务走势。"
+                    actions={<Button disabled={busy === 'sample'} onClick={sample}>手动采样</Button>}
+                  />
+                </div>
+              )}
             </div>
             <div className="row mt" style={{ justifyContent: 'space-between' }}>
               <span className="small muted">后台定时采样；可手动补一次深度采样</span>
@@ -144,6 +164,7 @@ export default function Queue() {
               className={`btn ${state === s ? 'primary' : ''}`}
               onClick={() => {
                 setState(s)
+                setPage(1)
                 run(s)
               }}
             >
@@ -159,6 +180,7 @@ export default function Queue() {
         ) : (rows ?? []).length === 0 ? (
           <Empty text="队列空闲：当前没有待处理、排队或执行中的任务" />
         ) : (
+          <>
           <table className="tbl">
             <thead>
               <tr>
@@ -172,7 +194,7 @@ export default function Queue() {
               </tr>
             </thead>
             <tbody>
-              {(rows ?? []).map((j) => (
+              {(rows ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((j) => (
                 <tr key={j.job_id}>
                   <td className="mono small">{shortId(j.job_id)}</td>
                   <td className="mono small">{j.job_type}</td>
@@ -206,6 +228,12 @@ export default function Queue() {
               ))}
             </tbody>
           </table>
+          {pagerTotal > PAGE_SIZE && (
+            <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+              <Pagination current={page} pageSize={PAGE_SIZE} total={pagerTotal} onChange={setPage} />
+            </div>
+          )}
+          </>
         )}
       </Card>
       </div>

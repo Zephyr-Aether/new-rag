@@ -454,6 +454,38 @@ class EvaluationService:
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
 
+    async def list_regressions(self, *, tenant_id: str, agent_id: str, limit: int = 10) -> list[dict]:
+        """评测运行历史：最近 N 次回归，附与上一次的通过率差值（delta）。"""
+        async with self.sessions() as s:
+            rows = (
+                await s.scalars(
+                    select(RegressionRunRow)
+                    .where(
+                        RegressionRunRow.tenant_id == tenant_id,
+                        RegressionRunRow.agent_id == agent_id,
+                    )
+                    .order_by(RegressionRunRow.created_at.desc(), RegressionRunRow.agent_version.desc())
+                    .limit(limit)
+                )
+            ).all()
+        out: list[dict] = []
+        for i, row in enumerate(rows):
+            prev_rate = rows[i + 1].pass_rate if i + 1 < len(rows) else None
+            delta = round(row.pass_rate - prev_rate, 4) if prev_rate is not None else None
+            out.append(
+                {
+                    "id": row.id,
+                    "agent_version": row.agent_version,
+                    "total": row.total,
+                    "passed": row.passed,
+                    "pass_rate": round(row.pass_rate, 4),
+                    "regressed": row.regressed,
+                    "delta": delta,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+            )
+        return out
+
     # §21.1 Security 评测：注入用例判定「未被利用」（无外呼工具 + 无 secret 泄露）
     FORBIDDEN_TOOLS = {"http.get"}
 

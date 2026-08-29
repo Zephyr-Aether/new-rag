@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Drawer } from 'antd'
-import { Badge, Button, ErrorBox, Field, SuccessBox, stateLabel } from '@/components/ui'
+import { Pagination } from '@/components/pagination'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/sheet'
+import { Badge, Button, ErrorBox, Field, stateLabel } from '@/components'
 import { EmptyState } from '@/components/Page'
 import { CodeEditor } from '@/components/CodeEditor'
-import { useConfirm } from '@/components/Confirm'
-import { CustomTool } from '@/api'
+import { CustomTool } from '@/services'
+
+const PAGE_SIZE = 10
 
 const RISK_OPTIONS = [
   { value: 'READ', label: '只读（READ）' },
@@ -21,13 +23,11 @@ interface CustomToolDrawerProps {
   customTools: CustomTool[] | null
   reservedRefs: string[]
   busy: boolean
-  msg: { kind: 'ok' | 'err'; text: string } | null
   onSave: (body: { ref: string; description: string; timeout_s: number; risk_level: string; input_schema: Record<string, unknown>; code: string }) => void
   onDelete: (ref: string) => void
 }
 
-export default function CustomToolDrawer({ open, onClose, customTools, reservedRefs, busy, msg, onSave, onDelete }: CustomToolDrawerProps) {
-  const { confirm, confirmEl } = useConfirm()
+export default function CustomToolDrawer({ open, onClose, customTools, reservedRefs, busy, onSave, onDelete }: CustomToolDrawerProps) {
   const [step, setStep] = useState(0)
   const [ref, setRef] = useState('')
   const [desc, setDesc] = useState('')
@@ -36,6 +36,8 @@ export default function CustomToolDrawer({ open, onClose, customTools, reservedR
   const [schema, setSchema] = useState(`{\n  "type": "object",\n  "properties": {}\n}`)
   const [code, setCode] = useState('def run(args):\n    return {"echo": args}')
   const [dupErr, setDupErr] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   function load(t: CustomTool) {
     setStep(0)
@@ -79,8 +81,12 @@ export default function CustomToolDrawer({ open, onClose, customTools, reservedR
   const canNext = step === 0 ? ref.trim().length > 0 : step === 1 ? (() => { try { JSON.parse(schema) ; return true } catch { return false } })() : code.trim().length > 0
 
   return (
-    <Drawer title="自定义工具" open={open} onClose={onClose} width={640}>
-      {confirmEl}
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="w-[640px] max-w-[640px] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>自定义工具</SheetTitle>
+        </SheetHeader>
+        <div className="px-4">
       <div className="custom-steps">
         {STEPS.map((s, i) => (
           <div key={s} className={`custom-step${i === step ? ' on' : ''}${i < step ? ' done' : ''}`}>
@@ -133,9 +139,10 @@ export default function CustomToolDrawer({ open, onClose, customTools, reservedR
         </div>
       </div>
       {dupErr && <div className="mt"><ErrorBox message={dupErr} /></div>}
-      {msg && <div className="mt">{msg.kind === 'ok' ? <SuccessBox message={msg.text} /> : <ErrorBox message={msg.text} />}</div>}
+      
 
       {customTools !== null && customTools.length > 0 && (
+        <>
         <table className="tbl mt">
           <thead>
             <tr>
@@ -147,7 +154,7 @@ export default function CustomToolDrawer({ open, onClose, customTools, reservedR
             </tr>
           </thead>
           <tbody>
-            {customTools.map((t) => (
+            {customTools.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((t) => (
               <tr key={t.ref}>
                 <td className="mono small">{t.ref}</td>
                 <td className="small muted">{t.description || '—'}</td>
@@ -156,17 +163,36 @@ export default function CustomToolDrawer({ open, onClose, customTools, reservedR
                 <td>
                   <div className="row" style={{ gap: 6 }}>
                     <Button disabled={busy} onClick={() => load(t)}>编辑</Button>
-                    <Button tone="danger" disabled={busy} onClick={() => confirm('删除自定义工具', `确定删除「${t.ref}」吗？此操作不可撤销。`, () => onDelete(t.ref), { danger: true, confirmText: '删除' })}>删除</Button>
+                    <Button tone="danger" disabled={busy} onClick={() => onDelete(t.ref)}>删除</Button>
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {customTools.length > PAGE_SIZE && (
+          <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+            <Pagination current={page} pageSize={PAGE_SIZE} total={customTools.length} onChange={setPage} />
+          </div>
+        )}
+        </>
       )}
       {customTools !== null && customTools.length === 0 && (
         <div className="mt"><EmptyState title="还没有自定义工具" desc="按上面的三步创建第一个自定义工具，保存后自动热注册。" /></div>
       )}
-    </Drawer>
+
+      {confirmDelete && (
+        <div className="drawer-confirm">
+          <div className="drawer-confirm-title">删除自定义工具</div>
+          <div className="small">确定删除「{confirmDelete}」吗？此操作不可撤销。</div>
+          <div className="row mt" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setConfirmDelete(null)}>取消</Button>
+            <Button tone="danger" disabled={busy} onClick={() => { onDelete(confirmDelete); setConfirmDelete(null) }}>删除</Button>
+          </div>
+        </div>
+      )}
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }

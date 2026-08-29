@@ -1,8 +1,12 @@
+import { useState } from 'react'
+import { Pagination } from '@/components/pagination'
 import { Link } from 'react-router-dom'
 import { useRequest } from 'ahooks'
-import { api, ModelHealthEntry } from '@/api'
-import { Badge, Card, TableSkeleton } from '@/components/ui'
+import { api, ModelHealthEntry } from '@/services'
+import { Badge, Card, TableSkeleton } from '@/components'
 import { EmptyState, PageError, PageHeader } from '@/components/Page'
+
+const PAGE_SIZE = 10
 
 type HealthDecision = {
   badge: 'OK' | 'WARN' | 'FAIL'
@@ -43,6 +47,7 @@ export default function ModelHealth() {
   const { data, loading, error, refresh } = useRequest(() => api.modelHealth())
   const models = data?.models ?? null
   const breaker = data?.breaker
+  const [page, setPage] = useState(1)
 
   const assessed = (models ?? []).map((m) => ({ model: m, decision: assessModel(m) }))
   const healthy = assessed.filter((row) => row.decision.badge === 'OK')
@@ -90,7 +95,7 @@ export default function ModelHealth() {
       : '还没有模型健康数据：接入模型并跑几次任务后，这里会展示每个模型的状态、风险等级与流量分配。'
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid" style={{ gap: 16 }}>
       {error && <PageError message={(error as Error).message} retry={() => refresh()} />}
 
       <PageHeader
@@ -181,7 +186,7 @@ export default function ModelHealth() {
               </tr>
             </thead>
             <tbody>
-              {assessed.map(({ model: m, decision }) => (
+              {assessed.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(({ model: m, decision }) => (
                 <tr key={m.model}>
                   <td className="mono">{m.model}</td>
                   <td>
@@ -199,6 +204,11 @@ export default function ModelHealth() {
               ))}
             </tbody>
           </table>
+        )}
+        {assessed.length > PAGE_SIZE && (
+          <div className="row mt" style={{ justifyContent: 'flex-end' }}>
+            <Pagination current={page} pageSize={PAGE_SIZE} total={assessed.length} onChange={setPage} />
+          </div>
         )}
         <p className="small muted mt">
           熔断器状态：{breaker ? <code>{breaker}</code> : '—'}（CLOSED=正常 / OPEN=熔断 / HALF_OPEN=试探）

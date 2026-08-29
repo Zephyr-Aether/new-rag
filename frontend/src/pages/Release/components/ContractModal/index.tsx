@@ -1,6 +1,6 @@
-import { Button, Modal } from '@/components/ui'
-import { Badge } from '@/components/ui'
-import { ContractCheck } from '@/api'
+import { Button, Modal } from '@/components'
+import { Badge } from '@/components'
+import { ContractCheck } from '@/services'
 
 export default function ContractModal({
   data,
