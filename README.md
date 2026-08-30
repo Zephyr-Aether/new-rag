@@ -84,11 +84,11 @@ schema.sql          全量表结构参考
 ## 界面预览
 
 > 截图放在 `docs/screenshots/`，markdown 里用相对路径引用即可，GitHub 会自动渲染。
-> 没图的地方先空着，有截图再补。
+> 占位文件名已固定，把截图重命名成对应名字覆盖进去即可显示。
 
 ### 发布
 
-发布总览 / 创建发布单 / 发布单详情 / 发布单列表，按发布流主线操作。
+按发布流主线操作：总览 → 创建发布单 → 详情（走流程）→ 列表。
 
 <!-- 发布总览：当前 Agent / 当前版本 / 发布状态 / 主流程步骤条 / 主按钮（创建发布单 或 继续当前发布） -->
 ![发布总览](docs/screenshots/release-overview.png)
@@ -102,13 +102,63 @@ schema.sql          全量表结构参考
 <!-- 发布单列表：全部发布单（进行中 / 已完成 / 已终止） -->
 ![发布单列表](docs/screenshots/order-list.png)
 
-### 治理与监控
+### 工作区
 
-<!-- 权限策略 / 用户角色 -->
-![权限与用户](docs/screenshots/governance.png)
+<!-- 首页：平台总览与快捷入口 -->
+![首页](docs/screenshots/home.png)
 
-<!-- 模型健康 / 成本监控 -->
-![模型健康与成本](docs/screenshots/model-cost.png)
+<!-- 知识库：文档 / 切片 / 检索验证 -->
+![知识库](docs/screenshots/knowledge.png)
+
+<!-- 对话：Agent 对话与工具调用 -->
+![对话](docs/screenshots/chat.png)
+
+<!-- 评测：基准集 / 回归 / 安全评测 -->
+![评测](docs/screenshots/evaluation.png)
+
+<!-- 任务记录：Agent Run 列表与详情 -->
+![任务记录](docs/screenshots/runs.png)
+
+### 治理与管理
+
+<!-- 用户管理：用户与角色分配 -->
+![用户管理](docs/screenshots/users.png)
+
+<!-- 权限策略：角色 / 策略 -->
+![权限策略](docs/screenshots/policies.png)
+
+<!-- 操作记录：审计日志 -->
+![操作记录](docs/screenshots/audit.png)
+
+<!-- 任务队列：队列运维 -->
+![任务队列](docs/screenshots/queue.png)
+
+<!-- 事件：事件流 -->
+![事件](docs/screenshots/events.png)
+
+<!-- 数据生命周期：数据保留与清理 -->
+![数据生命周期](docs/screenshots/data.png)
+
+<!-- 配置中心：运行时配置 -->
+![配置中心](docs/screenshots/settings.png)
+
+<!-- 模型健康：模型状态与限流 -->
+![模型健康](docs/screenshots/model.png)
+
+<!-- 成本：成本统计与趋势 -->
+![成本](docs/screenshots/cost.png)
+
+<!-- 工具：工具注册与管理 -->
+![工具](docs/screenshots/tools.png)
+
+<!-- 审批：待审批事项 -->
+![审批](docs/screenshots/approvals.png)
+
+<!-- 历史记忆：Agent 记忆回放 -->
+![历史记忆](docs/screenshots/memory.png)
+
+<!-- 关系图谱：实体与关系 -->
+![关系图谱](docs/screenshots/graph.png)
 
 ## 测试与检查
 
