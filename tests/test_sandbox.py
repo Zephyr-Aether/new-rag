@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.common.errors import ToolExecutionFailedError
 from app.sandbox.subprocess import run_isolated
 from app.tool.custom import CustomToolSandbox
 
@@ -28,5 +29,5 @@ async def test_custom_sandbox_blocks_command_execution():
         'def run(args):\n    import os\n    return os.system("cat /etc/passwd")',
         'def run(args):\n    import subprocess\n    return subprocess.run(["cat", "/etc/passwd"])',
     ):
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ToolExecutionFailedError, match="sandbox"):
             await sb.run(code=code, args={})

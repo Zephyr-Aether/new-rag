@@ -11,7 +11,7 @@
 | 层 | 选型 |
 |---|---|
 | 后端 | Python 3.12 / FastAPI / SQLAlchemy 异步 / Pydantic v2 |
-| 存储 | SQLite（开发/测试默认，`sqlite+aiosqlite`）/ PostgreSQL + pgvector（生产，docker-compose 提供）/ 可选 Redis |
+| 存储 | PostgreSQL + pgvector（开发/生产统一，docker-compose 提供）/ 可选 Redis |
 | LLM | OpenAI 兼容网关；默认 MockProvider（离线跑通全链路） |
 | 前端 | React 18 + TypeScript + Vite + Tailwind v4 + **shadcn/ui** + react-router |
 | 可观测 | OpenTelemetry（OTel）Trace + 采样 payload 存储 |
@@ -22,7 +22,7 @@
 ## 快速开始
 
 ```bash
-# 后端（无需外部依赖：dev.db + mock provider）
+# 后端（先 docker compose up -d pgvector 起 Postgres；mock provider 无 API key）
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 # 打开控制台 http://localhost:8000/  （前端构建产物由后端托管；dev 热更：cd frontend && npm run dev → :5173）
 

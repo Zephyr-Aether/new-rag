@@ -2,7 +2,7 @@
 
 用法：
     python scripts/backup.py backup            # 备份到 backups/agent-<ts>.<ext>
-    python scripts/backup.py restore <file>    # 恢复（SQLite 覆盖 dev.db；PG 走 psql 需手动确认）
+    python scripts/backup.py restore <file>    # 恢复（SQLite 覆盖本地文件；PG 走 psql 需手动确认）
 """
 
 import os
@@ -23,7 +23,7 @@ def _database_url() -> str:
 
 
 def _sqlite_file(url: str) -> Path:
-    # sqlite+aiosqlite:///./dev.db 或绝对路径
+    # 如 sqlite+aiosqlite:///./test.db 或绝对路径
     raw = url.split("///", 1)[-1]
     p = Path(raw)
     return p if p.is_absolute() else ROOT / p

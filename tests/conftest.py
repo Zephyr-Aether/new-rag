@@ -8,6 +8,8 @@ import tempfile
 import uuid
 
 _tmpdir = tempfile.mkdtemp(prefix="agent_platform_tests_")
+# 测试不读开发者 .env：指向不存在的文件，用例结果与本机 .env 内容解耦
+os.environ.setdefault("APP_ENV_FILE", "/nonexistent/agent-platform-test.env")
 os.environ.setdefault("APP_DATABASE_URL", f"sqlite+aiosqlite:///{_tmpdir}/test.db")
 os.environ.setdefault("APP_LLM_PROVIDER", "mock")
 os.environ.setdefault("APP_REDIS_URL", "")

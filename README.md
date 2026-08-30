@@ -12,7 +12,7 @@
 | --- | --- |
 | 后端 | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · Pydantic v2 |
 | 前端 | React · TypeScript · Vite · antd / shadcn 风格组件 |
-| 存储 | SQLite（开发默认）· PostgreSQL + asyncpg（生产）· alembic 迁移 |
+| 存储 | PostgreSQL + pgvector（开发/生产统一，docker-compose 提供）· alembic 迁移 |
 | 其他 | Redis（可选，空则进程内锁）· OpenTelemetry 可观测 |
 
 ## 快速开始
@@ -21,10 +21,13 @@
 # 1. 初始化虚拟环境并安装
 make install
 
-# 2. 启动后端（FastAPI，端口 8000；默认 SQLite dev.db，mock LLM Provider，无需外部依赖）
+# 2. 启动依赖数据库（Postgres+pgvector，本机 5433）
+docker compose up -d pgvector
+
+# 3. 启动后端（FastAPI，端口 8000；连接 Postgres，mock LLM Provider 无需 API key）
 make run
 
-# 3. 前端开发服务器（Vite，代理 /api 到 8000）
+# 4. 前端开发服务器（Vite，代理 /api 到 8000）
 cd frontend && npm install && npm run dev
 ```
 
@@ -46,7 +49,7 @@ make migrate
 # 生成新迁移（模型加列后执行，见 CLAUDE.md 约定）
 make migrate-gen
 
-# 数据库连接由 .env 的 APP_DATABASE_URL 控制（默认 SQLite，生产用 PostgreSQL）
+# 数据库连接由 .env 的 APP_DATABASE_URL 控制（默认本地 Postgres:5433，即 compose 的 pgvector）
 ```
 
 - 全量参考 schema 见 `schema.sql`
@@ -134,9 +137,6 @@ schema.sql          全量表结构参考
 
 <!-- 配置中心：运行时配置 -->
 ![配置中心](/docs/screenshots/401F7F49-97AE-4A9D-A418-45340CA03805.png)
-
-<!-- 模型健康：模型状态与限流 -->
-![模型健康](docs/screenshots/model.png)
 
 <!-- 成本：成本统计与趋势 -->
 ![成本](/docs/screenshots/E45F88F5-0617-4931-A632-E4802E692B8F.png)

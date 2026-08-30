@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 
 from pydantic import model_validator
@@ -5,15 +6,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="APP_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="APP_",
+        env_file=os.getenv("APP_ENV_FILE", ".env"),
+        extra="ignore",
+    )
 
     app_name: str = "agent-platform"
     environment: str = "dev"  # dev / test / prod
     debug: bool = False
 
     # ---- storage ----
-    # 默认 SQLite（开发/测试免外部服务）；生产用 postgresql+asyncpg
-    database_url: str = "sqlite+aiosqlite:///./dev.db"
+    # 默认本地 Postgres（docker compose up -d pgvector）；测试用 SQLite（conftest 覆盖）
+    database_url: str = "postgresql+asyncpg://agent:agent@localhost:5433/agent"
     redis_url: str = ""  # 空 => 进程内锁（单实例）
 
     # ---- LLM ----

@@ -1,13 +1,13 @@
 ---
 name: run
-description: 启动并驱动这个 Agent 平台应用（FastAPI/uvicorn，mock provider + SQLite，无需外部依赖）。
+description: 启动并驱动这个 Agent 平台应用（FastAPI/uvicorn，Postgres + mock provider，无 API key）。
 ---
 
 # Run: Agent Platform（FastAPI + React 控制台）
 
 ## 启动
 
-后台启动（无需外部依赖：默认 `dev.db` + mock provider，无 API key）：
+先确认 Postgres 已起（本机 5433；未起则 `docker compose up -d pgvector`），再后台启动（mock provider，无 API key）：
 
 ```bash
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level warning > /tmp/api.log 2>&1 &
@@ -65,6 +65,6 @@ lsof -ti:8000 -sTCP:LISTEN | xargs -r kill
 
 ## 说明
 
-- 环境变量：`APP_DATABASE_URL`（默认 `sqlite+aiosqlite:///./dev.db`）、`APP_LLM_PROVIDER`（默认 `mock`，接真 LLM 设 `openai` + base_url/key）。
+- 环境变量：`APP_DATABASE_URL`（默认 `postgresql+asyncpg://agent:agent@localhost:5433/agent`）、`APP_LLM_PROVIDER`（默认 `mock`，接真 LLM 设 `openai` + base_url/key）。
 - 异步 run：`{"await_result": false}` 入队，轮询 `GET /agents/runs/{id}` 到 `COMPLETED`。
 - 测试：`make test`（237 个）；混沌/评测/压测脚本：`make chaos` / `scripts/eval.py` / `scripts/bench_load.py`。

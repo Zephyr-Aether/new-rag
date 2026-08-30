@@ -76,7 +76,7 @@ Phase 0-4 全部核心项已完成；剩余为部署/打磨（真实域名 TLS�
 | 现状 | 位置 |
 |---|---|
 | `auth_require_jwt=False` 时，无 token 请求直接回落 seed 管理员 | [deps.py:66-71](app/gateway/deps.py#L66-L71) |
-| 默认 `APP_LLM_PROVIDER=mock`、`dev.db`、seed 身份 | [.env.example](.env.example) |
+| 默认 `APP_LLM_PROVIDER=mock`、本地 Postgres（compose pgvector:5433）、seed 身份 | [.env.example](.env.example) |
 | 只有 seed 的 `user-default`，**没有用户管理入口**（无法建用户/设密/禁用） | [auth_api.py](app/gateway/auth_api.py) |
 | 租户 id 是任意字符串，无 onboarding/邀请/隔离校验 | 各 API 的 `tenant_id` 字段 |
 | `auth_jwt_secret` 默认 `dev-secret-change-me`，启动不校验 | [settings.py:37](app/settings.py#L37) |
@@ -146,7 +146,7 @@ Phase 0-4 全部核心项已完成；剩余为部署/打磨（真实域名 TLS�
 
 | 改动项 | 说明 |
 |---|---|
-| 生产 DB | PostgreSQL(asyncpg) + pgvector(知识库)；alembic 迁移现有 `dev.db` 数据 |
+| 生产 DB | PostgreSQL(asyncpg) + pgvector(知识库)；开发已统一连 Postgres，`dev.db` 已弃用 |
 | Redis | 限流 / 队列租约 / 分布式锁（现有空实现占位接上） |
 | 真实 LLM 链 | openai provider 全链路验证 + 密钥安全注入（依赖 Phase 1 的密钥持久化） |
 | docker-compose 生产化 | [docker-compose.yml](docker-compose.yml) 增加 app 服务、HTTPS(TLS)、healthcheck、日志卷 |
@@ -185,7 +185,7 @@ Phase 0-4 全部核心项已完成；剩余为部署/打磨（真实域名 TLS�
 |---|---|
 | **依赖顺序** | Phase 0/1 串行前置；Phase 2 依赖 Phase 1（密钥/DB 是真实 LLM 的前提）；Phase 3/4 可与 2 并行 |
 | **测试回归** | 强制认证会改动 `get_subject` 语义，280 个测试中依赖「无 token 回落」的用例需同步改造（G1 落地时） |
-| **数据迁移** | `dev.db` → PostgreSQL 迁移需用 alembic 验证，向量表需 pgvector |
+| **数据迁移** | 开发已直接用 Postgres，无 `dev.db` → PG 迁移负担；向量表依赖 pgvector |
 | **行为差异** | mock → 真实 LLM 由确定性变非确定性，评测/回归用例需重标定 |
 | **密钥迁移** | 现有内存 SecretManager 无持久化数据可迁移，直接换实现即可，无历史包袱 |
 
