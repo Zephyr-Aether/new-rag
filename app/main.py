@@ -209,16 +209,16 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         setup_otel(settings)
         engine, sessions = create_engine_and_sessions(settings.database_url)
+        # §57.4 迁移优先：alembic 管理的库先 upgrade head（避免 create_all 先建表，
+        # 导致待执行迁移重复建表冲突）；create_all 新库/测试库无 alembic_version，跳过
+        if settings.environment != "test":
+            await _alembic_upgrade_if_managed(engine)
         await create_all(engine)
         # 开发库（create_all 管理）：幂等补新列（不 ALTER 已有表）；生产走 alembic
         if settings.database_url.startswith("sqlite"):
             await _ensure_columns(engine, _IDENTITY_ADDITIONS["sqlite"], "sqlite")
         elif settings.database_url.startswith("postgresql"):
             await _ensure_columns(engine, _IDENTITY_ADDITIONS["postgresql"], "postgresql")
-        # §57.4 迁移：alembic 管理的库启动自动 upgrade head（新表/列无需手工 make migrate；
-        # create_all 新库/测试库无 alembic_version，跳过，保持现状）
-        if settings.environment != "test":
-            await _alembic_upgrade_if_managed(engine)
         async with sessions() as session:
             seed = await seed_defaults(session, settings.seed_tenant, settings.seed_user)
         allowed_ports = {int(p) for p in settings.sandbox_allowed_ports.split(",") if p.strip().isdigit()}

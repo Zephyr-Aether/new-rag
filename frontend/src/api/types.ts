@@ -116,6 +116,33 @@ export interface Version {
   created_at?: string
 }
 
+export interface ReleaseOrder {
+  id: string
+  order_no: number
+  status: 'open' | 'done' | 'terminated'
+  created_by: string
+  summary: string
+  created_at?: string
+  ended_at?: string | null
+}
+
+export interface ReleaseOrderDetail extends ReleaseOrder {
+  records: {
+    version: number
+    step: string
+    operator: string
+    summary: string
+    ok: boolean
+    detail?: string | null
+    created_at?: string
+  }[]
+  snapshot: {
+    status: string
+    terminated: boolean
+    nodes: { code: string; name: string; status: string; config?: Record<string, unknown> }[]
+  }
+}
+
 export interface ContractCheck {
   agent_id: string
   version: number

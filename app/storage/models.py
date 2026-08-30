@@ -579,6 +579,7 @@ class ReleaseFlowHistoryRow(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     agent_id: Mapped[str] = mapped_column(String(64), index=True)
+    order_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     version: Mapped[int] = mapped_column(Integer, default=0)
     step: Mapped[str] = mapped_column(String(32))  # draft/contract/regression/gray/release
     operator: Mapped[str] = mapped_column(String(64), default="")
@@ -586,6 +587,24 @@ class ReleaseFlowHistoryRow(Base):
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReleaseOrderRow(Base):
+    """发布单（§21.5）：一次发布周期的正式记录（单号/状态/创建人/时间/涉及版本 + 节点快照）。"""
+
+    __tablename__ = "release_order"
+    __table_args__ = (UniqueConstraint("tenant_id", "agent_id", "order_no", name="uq_release_order_no"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    agent_id: Mapped[str] = mapped_column(String(64), index=True)
+    order_no: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open / done / terminated
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    summary: Mapped[str] = mapped_column(String(255), default="")
+    snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class TracePayloadRow(Base):

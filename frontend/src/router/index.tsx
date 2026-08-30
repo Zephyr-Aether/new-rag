@@ -9,7 +9,10 @@ import Login from '../pages/Login'
 const Dashboard = lazy(() => import('../pages/Dashboard'))
 const Runs = lazy(() => import('../pages/Runs'))
 const RunDetail = lazy(() => import('../pages/RunDetail'))
-const Release = lazy(() => import('../pages/Release'))
+const ReleaseOverview = lazy(() => import('../pages/Release/overview'))
+const ReleaseOrderList = lazy(() => import('../pages/Release/orderList'))
+const ReleaseOrderCreate = lazy(() => import('../pages/Release/orderCreate'))
+const ReleaseOrderDetail = lazy(() => import('../pages/Release/orderDetail'))
 const Knowledge = lazy(() => import('../pages/Knowledge'))
 const Memory = lazy(() => import('../pages/Memory'))
 const Cost = lazy(() => import('../pages/Cost'))
@@ -36,7 +39,10 @@ export default function AppRoutes() {
         <Route path="/runs" element={<Runs />} />
         <Route path="/runs/:id" element={<RunDetail />} />
         <Route path="/chat" element={<Chat />} />
-        <Route path="/release" element={<Release />} />
+        <Route path="/release" element={<ReleaseOverview />} />
+        <Route path="/release/orders" element={<ReleaseOrderList />} />
+        <Route path="/release/orders/new" element={<ReleaseOrderCreate />} />
+        <Route path="/release/orders/:orderId" element={<ReleaseOrderDetail />} />
         <Route path="/knowledge" element={<Knowledge />} />
         <Route path="/memory" element={<AdminGate><Memory /></AdminGate>} />
         <Route path="/graph" element={<AdminGate><Graph /></AdminGate>} />

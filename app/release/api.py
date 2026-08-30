@@ -59,6 +59,7 @@ async def create_version(
         system_prompt=body.system_prompt,
         model=body.model,
         config=body.config,
+        created_by=subject.user_id,
     )
 
 
@@ -366,4 +367,44 @@ async def save_release_flow_node(
         )
     return await state.release.save_node_config(
         tenant_id=subject.tenant_id, agent_id=agent_id, node_code=node_code, config=body.config
+    )
+
+
+@router.post("/{agent_id}/release-orders")
+async def create_release_order(
+    agent_id: str,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+    _: Annotated[Subject, Depends(require_perm("release:version:create", "*"))],
+) -> dict:
+    """创建发布单：终止旧的进行中单、重置发布流到草稿步，进入新的发布单流程。"""
+    state: AppState = request.app.state.agent
+    return await state.release.create_order(
+        tenant_id=subject.tenant_id, agent_id=agent_id, created_by=subject.user_id
+    )
+
+
+@router.get("/{agent_id}/release-orders")
+async def list_release_orders(
+    agent_id: str,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+) -> dict:
+    """列出全部发布单（新→旧）。"""
+    state: AppState = request.app.state.agent
+    orders = await state.release.list_orders(tenant_id=subject.tenant_id, agent_id=agent_id)
+    return {"agent_id": agent_id, "orders": orders}
+
+
+@router.get("/{agent_id}/release-orders/{order_id}")
+async def get_release_order(
+    agent_id: str,
+    order_id: str,
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+) -> dict:
+    """发布单详情：元信息 + 节点快照 + 该单留痕。"""
+    state: AppState = request.app.state.agent
+    return await state.release.get_order(
+        tenant_id=subject.tenant_id, agent_id=agent_id, order_id=order_id
     )

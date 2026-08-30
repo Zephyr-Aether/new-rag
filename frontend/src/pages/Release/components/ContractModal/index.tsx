@@ -5,11 +5,9 @@ import { ContractCheck } from '@/services'
 export default function ContractModal({
   data,
   onClose,
-  onEvaluate,
 }: {
   data: ContractCheck
   onClose: () => void
-  onEvaluate: () => void
 }) {
   return (
     <Modal title={`发布契约检查 · v${data.version}`} onClose={onClose}>
@@ -42,11 +40,9 @@ export default function ContractModal({
         </tbody>
       </table>
       <div className="row mt">
-        <Button tone="primary" disabled={data.blocked} onClick={onEvaluate}>
-          通过回归并发布
-        </Button>
-        <Button onClick={onClose}>关闭</Button>
+        <Button tone="primary" onClick={onClose}>{data.blocked ? '知道了' : '进入回归评测'}</Button>
       </div>
+      {!data.blocked && <p className="small muted mt">契约已通过，流程已推进到「回归评测」。发布会在走完回归与灰度后在最终节点进行。</p>}
     </Modal>
   )
 }

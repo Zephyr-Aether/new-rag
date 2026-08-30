@@ -1,6 +1,6 @@
 import { get, post } from './http'
 
-import type { CanaryCheck, ContractCheck, Regression, ReleaseMetrics, SecurityEval, Version } from '../api/types'
+import type { CanaryCheck, ContractCheck, Regression, ReleaseMetrics, ReleaseOrder, ReleaseOrderDetail, SecurityEval, Version } from '../api/types'
 export const releaseApi = {
 // Release
   versions: (agentId: string) => get<{ agent_id: string; versions: Version[] }>(`/agents/${agentId}/versions`),
@@ -30,7 +30,7 @@ export const releaseApi = {
   releaseFlowRecord: (agentId: string, body: { version: number; step: string; summary: string; ok: boolean; detail?: string }) =>
     post<{ ok: boolean }>(`/agents/${agentId}/flow-history`, body),
   releaseFlow: (agentId: string) =>
-    get<{ agent_id: string; status: string; terminated: boolean; nodes: { code: string; name: string; config: Record<string, unknown> }[] }>(
+    get<{ agent_id: string; status: string; terminated: boolean; current_step: number; nodes: { code: string; name: string; config: Record<string, unknown>; status: string }[] }>(
       `/agents/${agentId}/release-flow`,
     ),
   releaseFlowNode: (agentId: string, nodeCode: string, config: Record<string, unknown>, status?: string) =>
@@ -38,7 +38,15 @@ export const releaseApi = {
   releaseFlowTerminate: (agentId: string) =>
     post<{ ok: boolean; terminated: boolean }>(`/agents/${agentId}/release-flow/terminate`),
   releaseFlowStart: (agentId: string) =>
-    post<{ agent_id: string; status: string; terminated: boolean; nodes: { code: string; name: string; config: Record<string, unknown> }[] }>(
+    post<{ agent_id: string; status: string; terminated: boolean; current_step: number; nodes: { code: string; name: string; config: Record<string, unknown>; status: string }[] }>(
       `/agents/${agentId}/release-flow/start`,
     ),
+  releaseOrderCreate: (agentId: string) =>
+    post<ReleaseOrder & { flow: { status: string; terminated: boolean; nodes: { code: string; name: string; config: Record<string, unknown> }[] } }>(
+      `/agents/${agentId}/release-orders`,
+    ),
+  releaseOrderList: (agentId: string) =>
+    get<{ agent_id: string; orders: ReleaseOrder[] }>(`/agents/${agentId}/release-orders`),
+  releaseOrderGet: (agentId: string, orderId: string) =>
+    get<ReleaseOrderDetail>(`/agents/${agentId}/release-orders/${orderId}`),
 }

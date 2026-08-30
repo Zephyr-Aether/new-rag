@@ -23,6 +23,7 @@ from app.storage.models import (
     EventRow,
     ReleaseFlowHistoryRow,
     ReleaseFlowNodeRow,
+    ReleaseOrderRow,
     ToolCallRow,
 )
 
@@ -124,9 +125,16 @@ class ReleaseService:
         system_prompt: str,
         model: str = "",
         config: dict | None = None,
+        created_by: str = "",
     ) -> dict:
-        await self._ensure_not_terminated(tenant_id=tenant_id, agent_id=agent_id)
-        """§22 版本只增不改：创建新 DRAFT 版本（version 自增，配置走新行）。"""
+        """§22 版本只增不改：创建新 DRAFT 版本（version 自增，配置走新行）。
+
+        发布流处于终态（done/disabled/terminated）时，创建版本即隐式开启新一轮：
+        先重置 flow 状态，再建版本；进行中则直接追加版本。若无进行中的发布单则自动开一单。
+        """
+        if await self._flow_ended(tenant_id=tenant_id, agent_id=agent_id):
+            await self._reset_flow_state(tenant_id=tenant_id, agent_id=agent_id)
+        await self._ensure_open_order(tenant_id=tenant_id, agent_id=agent_id, created_by=created_by)
         async with self.sessions() as s:
             agent = await s.scalar(
                 select(AgentRow).where(AgentRow.id == agent_id, AgentRow.tenant_id == tenant_id)
@@ -662,13 +670,15 @@ class ReleaseService:
         ok: bool,
         detail: str | None = None,
     ) -> dict:
-        """发布流程执行历史（留痕）：记录一步的创建/契约/回归/灰度/上线。"""
+        """发布流程执行历史（留痕）：记录一步的创建/契约/回归/灰度/上线，挂到当前发布单下。"""
+        order_id = await self._current_order_id(tenant_id=tenant_id, agent_id=agent_id)
         async with self.sessions() as s:
             s.add(
                 ReleaseFlowHistoryRow(
                     id=uuid.uuid4().hex,
                     tenant_id=tenant_id,
                     agent_id=agent_id,
+                    order_id=order_id,
                     version=version,
                     step=step,
                     operator=operator,
@@ -737,6 +747,54 @@ class ReleaseService:
             )
             await s.commit()
 
+    async def _flow_ended(self, *, tenant_id: str, agent_id: str) -> bool:
+        """发布流是否处于终态（done/disabled/terminated）：此时创建新版本应隐式开启新一轮。"""
+        async with self.sessions() as s:
+            meta = await s.scalar(
+                select(ReleaseFlowNodeRow).where(
+                    ReleaseFlowNodeRow.tenant_id == tenant_id,
+                    ReleaseFlowNodeRow.agent_id == agent_id,
+                    ReleaseFlowNodeRow.node_code == "_meta",
+                )
+            )
+        cfg = _load_json(meta.config_json) if meta else {}
+        if cfg.get("terminated"):
+            return True
+        status = cfg.get("status")
+        if not status:
+            async with self.sessions() as s:
+                latest_status = await s.scalar(
+                    select(AgentVersionRow.status).where(
+                        AgentVersionRow.tenant_id == tenant_id,
+                        AgentVersionRow.agent_id == agent_id,
+                    ).order_by(AgentVersionRow.version.desc()).limit(1)
+                )
+            status = (
+                {"DRAFT": "draft", "GRAY": "gray", "ACTIVE": "done", "DISABLED": "disabled"}.get(latest_status, "empty")
+                if latest_status
+                else "empty"
+            )
+        return status in ("done", "disabled")
+
+    async def _reset_flow_state(self, *, tenant_id: str, agent_id: str) -> None:
+        """把发布流重置为 empty 初始态：清空各节点 config、解除终止。"""
+        await self._ensure_flow_nodes(tenant_id=tenant_id, agent_id=agent_id)
+        async with self.sessions() as s:
+            rows = (
+                await s.scalars(
+                    select(ReleaseFlowNodeRow).where(
+                        ReleaseFlowNodeRow.tenant_id == tenant_id, ReleaseFlowNodeRow.agent_id == agent_id
+                    )
+                )
+            ).all()
+            for r in rows:
+                if r.node_code == "_meta":
+                    r.config_json = json.dumps({"status": "empty", "terminated": False})
+                else:
+                    r.config_json = "{}"
+                r.updated_at = datetime.now(UTC)
+            await s.commit()
+
     async def get_flow_config(self, *, tenant_id: str, agent_id: str) -> dict:
         """发布流配置：5 节点（code/name/config）+ 当前阶段 status + 是否终止。"""
         await self._ensure_flow_nodes(tenant_id=tenant_id, agent_id=agent_id)
@@ -768,6 +826,9 @@ class ReleaseService:
         terminated = bool(meta.get("terminated"))
         if terminated:
             status = "terminated"
+        # 按规范顺序排序（DB 行序可能乱），再算每节点状态
+        node_order = {code: i for i, (code, _) in enumerate(FLOW_NODES)}
+        nodes.sort(key=lambda n: node_order.get(n["code"], 99))
         # 当前步骤 + 每节点状态（按 flow status 推导，前端据此渲染）
         step_map = {"empty": 0, "draft": 1, "contract": 1, "regression": 2, "gray": 3,
                      "release": 4, "done": 4, "disabled": 4}
@@ -834,6 +895,10 @@ class ReleaseService:
             row.config_json = json.dumps(cfg, ensure_ascii=False)
             row.updated_at = datetime.now(UTC)
             await s.commit()
+        if status == "done":
+            # 流程走完 → 关单并留存节点快照（供历史发布单回看）
+            snapshot = await self.get_flow_config(tenant_id=tenant_id, agent_id=agent_id)
+            await self._close_order(tenant_id=tenant_id, agent_id=agent_id, status="done", snapshot=snapshot)
         return {"ok": True, "status": status}
 
     async def terminate_flow(self, *, tenant_id: str, agent_id: str) -> dict:
@@ -859,24 +924,179 @@ class ReleaseService:
             row.config_json = json.dumps(cfg, ensure_ascii=False)
             row.updated_at = datetime.now(UTC)
             await s.commit()
+        await self._close_order(tenant_id=tenant_id, agent_id=agent_id, status="terminated")
         return {"ok": True, "terminated": True}
 
     async def start_flow(self, *, tenant_id: str, agent_id: str) -> dict:
         """开启新的发布流：清空各节点 config，重置阶段为 empty、解除终止。"""
+        await self._reset_flow_state(tenant_id=tenant_id, agent_id=agent_id)
+        return await self.get_flow_config(tenant_id=tenant_id, agent_id=agent_id)
+
+    # ==================== 发布单（§21.5） ====================
+
+    @staticmethod
+    def _order_dict(order: ReleaseOrderRow) -> dict:
+        return {
+            "id": order.id,
+            "order_no": order.order_no,
+            "status": order.status,
+            "created_by": order.created_by,
+            "summary": order.summary,
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+            "ended_at": order.ended_at.isoformat() if order.ended_at else None,
+        }
+
+    async def _current_order_id(self, *, tenant_id: str, agent_id: str) -> str | None:
+        """当前发布单 id（存于 flow meta 的 order_id 字段）。"""
+        async with self.sessions() as s:
+            meta = await s.scalar(
+                select(ReleaseFlowNodeRow).where(
+                    ReleaseFlowNodeRow.tenant_id == tenant_id,
+                    ReleaseFlowNodeRow.agent_id == agent_id,
+                    ReleaseFlowNodeRow.node_code == "_meta",
+                )
+            )
+        if meta is None:
+            return None
+        return _load_json(meta.config_json).get("order_id")
+
+    async def _set_current_order_id(self, *, tenant_id: str, agent_id: str, order_id: str) -> None:
+        async with self.sessions() as s:
+            row = await s.scalar(
+                select(ReleaseFlowNodeRow).where(
+                    ReleaseFlowNodeRow.tenant_id == tenant_id,
+                    ReleaseFlowNodeRow.agent_id == agent_id,
+                    ReleaseFlowNodeRow.node_code == "_meta",
+                )
+            )
+            if row is None:
+                row = ReleaseFlowNodeRow(
+                    id=uuid.uuid4().hex, tenant_id=tenant_id, agent_id=agent_id,
+                    node_code="_meta", node_name="meta", config_json="{}",
+                )
+                s.add(row)
+            cfg = _load_json(row.config_json)
+            cfg["order_id"] = order_id
+            row.config_json = json.dumps(cfg, ensure_ascii=False)
+            row.updated_at = datetime.now(UTC)
+            await s.commit()
+
+    async def _ensure_open_order(
+        self, *, tenant_id: str, agent_id: str, created_by: str = ""
+    ) -> ReleaseOrderRow:
+        """确保存在进行中的发布单（无则创建），并把 flow meta 指向它。"""
+        async with self.sessions() as s:
+            order = await s.scalar(
+                select(ReleaseOrderRow).where(
+                    ReleaseOrderRow.tenant_id == tenant_id,
+                    ReleaseOrderRow.agent_id == agent_id,
+                    ReleaseOrderRow.status == "open",
+                ).order_by(ReleaseOrderRow.order_no.desc()).limit(1)
+            )
+            if order is None:
+                last_no = await s.scalar(
+                    select(func.max(ReleaseOrderRow.order_no)).where(
+                        ReleaseOrderRow.tenant_id == tenant_id,
+                        ReleaseOrderRow.agent_id == agent_id,
+                    )
+                )
+                order = ReleaseOrderRow(
+                    id=uuid.uuid4().hex, tenant_id=tenant_id, agent_id=agent_id,
+                    order_no=(last_no or 0) + 1, status="open", created_by=created_by,
+                )
+                s.add(order)
+                await s.commit()
+                await s.refresh(order)
+        await self._set_current_order_id(tenant_id=tenant_id, agent_id=agent_id, order_id=order.id)
+        return order
+
+    async def create_order(self, *, tenant_id: str, agent_id: str, created_by: str = "") -> dict:
+        """创建发布单：终止旧的进行中单、重置发布流到草稿步，开新一单并返回最新 flow。"""
         await self._ensure_flow_nodes(tenant_id=tenant_id, agent_id=agent_id)
+        await self._close_order(tenant_id=tenant_id, agent_id=agent_id, status="terminated")
+        await self._reset_flow_state(tenant_id=tenant_id, agent_id=agent_id)
+        order = await self._ensure_open_order(tenant_id=tenant_id, agent_id=agent_id, created_by=created_by)
+        flow = await self.get_flow_config(tenant_id=tenant_id, agent_id=agent_id)
+        return {**self._order_dict(order), "flow": flow}
+
+    async def list_orders(self, *, tenant_id: str, agent_id: str) -> list[dict]:
+        """列出全部发布单（新→旧）。"""
         async with self.sessions() as s:
             rows = (
                 await s.scalars(
-                    select(ReleaseFlowNodeRow).where(
-                        ReleaseFlowNodeRow.tenant_id == tenant_id, ReleaseFlowNodeRow.agent_id == agent_id
+                    select(ReleaseOrderRow).where(
+                        ReleaseOrderRow.tenant_id == tenant_id,
+                        ReleaseOrderRow.agent_id == agent_id,
+                    ).order_by(ReleaseOrderRow.order_no.desc())
+                )
+            ).all()
+        return [self._order_dict(r) for r in rows]
+
+    async def get_order(self, *, tenant_id: str, agent_id: str, order_id: str) -> dict:
+        """发布单详情：元信息 + 节点快照（进行中单取当前 flow）+ 该单下的留痕。"""
+        async with self.sessions() as s:
+            order = await s.scalar(
+                select(ReleaseOrderRow).where(
+                    ReleaseOrderRow.tenant_id == tenant_id,
+                    ReleaseOrderRow.agent_id == agent_id,
+                    ReleaseOrderRow.id == order_id,
+                )
+            )
+            if order is None:
+                raise AgentError(f"release order not found: {order_id}", code="RELEASE_ORDER_NOT_FOUND")
+            records = (
+                await s.scalars(
+                    select(ReleaseFlowHistoryRow).where(
+                        ReleaseFlowHistoryRow.tenant_id == tenant_id,
+                        ReleaseFlowHistoryRow.agent_id == agent_id,
+                        ReleaseFlowHistoryRow.order_id == order_id,
+                    ).order_by(ReleaseFlowHistoryRow.created_at.desc())
+                )
+            ).all()
+        d = self._order_dict(order)
+        d["records"] = [
+            {
+                "version": r.version, "step": r.step, "operator": r.operator,
+                "summary": r.summary, "ok": r.ok, "detail": r.detail,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in records
+        ]
+        d["snapshot"] = (
+            _load_json(order.snapshot_json)
+            if order.status != "open"
+            else await self.get_flow_config(tenant_id=tenant_id, agent_id=agent_id)
+        )
+        return d
+
+    async def _close_order(
+        self, *, tenant_id: str, agent_id: str, status: str, snapshot: dict | None = None
+    ) -> None:
+        """关闭进行中的发布单（done/terminated），记录快照、结束时间与涉及版本摘要。"""
+        async with self.sessions() as s:
+            order = await s.scalar(
+                select(ReleaseOrderRow).where(
+                    ReleaseOrderRow.tenant_id == tenant_id,
+                    ReleaseOrderRow.agent_id == agent_id,
+                    ReleaseOrderRow.status == "open",
+                ).order_by(ReleaseOrderRow.order_no.desc()).limit(1)
+            )
+            if order is None:
+                return
+            versions = (
+                await s.scalars(
+                    select(AgentVersionRow.version).where(
+                        AgentVersionRow.tenant_id == tenant_id,
+                        AgentVersionRow.agent_id == agent_id,
+                        AgentVersionRow.created_at >= order.created_at,
                     )
                 )
             ).all()
-            for r in rows:
-                if r.node_code == "_meta":
-                    r.config_json = json.dumps({"status": "empty", "terminated": False})
-                else:
-                    r.config_json = "{}"
-                r.updated_at = datetime.now(UTC)
+            order.status = status
+            order.ended_at = datetime.now(UTC)
+            if snapshot:
+                order.snapshot_json = json.dumps(snapshot, ensure_ascii=False)
+            if versions:
+                lo, hi = min(versions), max(versions)
+                order.summary = f"v{lo} → v{hi}" if lo != hi else f"v{lo}"
             await s.commit()
-        return await self.get_flow_config(tenant_id=tenant_id, agent_id=agent_id)

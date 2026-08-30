@@ -583,17 +583,38 @@ CREATE INDEX ix_messages_session_id ON messages (session_id);
 
 -- 发布流程执行历史（留痕）：发布页每步一次执行记录，供复盘。
 CREATE TABLE release_flow_history (
-	id VARCHAR(64) NOT NULL, 
-	tenant_id VARCHAR(64) NOT NULL, 
-	agent_id VARCHAR(64) NOT NULL, 
-	version INTEGER NOT NULL DEFAULT 0, 
-	step VARCHAR(32) NOT NULL, 
-	operator VARCHAR(64) NOT NULL DEFAULT '', 
-	summary VARCHAR(255) NOT NULL DEFAULT '', 
-	ok BOOLEAN NOT NULL DEFAULT 1, 
-	detail TEXT, 
-	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, 
+	id VARCHAR(64) NOT NULL,
+	tenant_id VARCHAR(64) NOT NULL,
+	agent_id VARCHAR(64) NOT NULL,
+	order_id VARCHAR(64),
+	version INTEGER NOT NULL DEFAULT 0,
+	step VARCHAR(32) NOT NULL,
+	operator VARCHAR(64) NOT NULL DEFAULT '',
+	summary VARCHAR(255) NOT NULL DEFAULT '',
+	ok BOOLEAN NOT NULL DEFAULT 1,
+	detail TEXT,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	PRIMARY KEY (id)
 );
 CREATE INDEX ix_release_flow_history_tenant_id ON release_flow_history (tenant_id);
 CREATE INDEX ix_release_flow_history_agent_id ON release_flow_history (agent_id);
+CREATE INDEX ix_release_flow_history_order_id ON release_flow_history (order_id);
+
+
+-- 发布单（§21.5）：一次发布周期的正式记录（单号/状态/创建人/时间/涉及版本 + 节点快照）。
+CREATE TABLE release_order (
+	id VARCHAR(64) NOT NULL,
+	tenant_id VARCHAR(64) NOT NULL,
+	agent_id VARCHAR(64) NOT NULL,
+	order_no INTEGER NOT NULL DEFAULT 1,
+	status VARCHAR(16) NOT NULL DEFAULT 'open',
+	created_by VARCHAR(64) NOT NULL DEFAULT '',
+	summary VARCHAR(255) NOT NULL DEFAULT '',
+	snapshot_json TEXT NOT NULL DEFAULT '{}',
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	ended_at DATETIME,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_release_order_no UNIQUE (tenant_id, agent_id, order_no)
+);
+CREATE INDEX ix_release_order_tenant_id ON release_order (tenant_id);
+CREATE INDEX ix_release_order_agent_id ON release_order (agent_id);

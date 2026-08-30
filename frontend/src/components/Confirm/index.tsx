@@ -1,9 +1,10 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Button, Modal } from '../'
 
 export interface ConfirmReq {
   title: string
-  desc: string
+  desc: ReactNode
   confirmText?: string
   danger?: boolean
   onConfirm: () => void
@@ -35,7 +36,7 @@ export default function Confirm({
 export function useConfirm() {
   const [req, setReq] = useState<ConfirmReq | null>(null)
   return {
-    confirm: (title: string, desc: string, onConfirm: () => void, opts: { danger?: boolean; confirmText?: string } = {}) =>
+    confirm: (title: string, desc: ReactNode, onConfirm: () => void, opts: { danger?: boolean; confirmText?: string } = {}) =>
       setReq({ title, desc, onConfirm, ...opts }),
     confirmEl: <Confirm req={req} onClose={() => setReq(null)} />,
   }
