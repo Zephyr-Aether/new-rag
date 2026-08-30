@@ -86,79 +86,72 @@ schema.sql          全量表结构参考
 > 截图放在 `docs/screenshots/`，markdown 里用相对路径引用即可，GitHub 会自动渲染。
 > 占位文件名已固定，把截图重命名成对应名字覆盖进去即可显示。
 
+### 首页
+<!-- 首页：平台总览与快捷入口 -->
+![首页](/docs/screenshots/EB331470-B103-4987-B3E3-5E5A840919CF.png)
+
 ### 发布
 
 按发布流主线操作：总览 → 创建发布单 → 详情（走流程）→ 列表。
 
 <!-- 发布总览：当前 Agent / 当前版本 / 发布状态 / 主流程步骤条 / 主按钮（创建发布单 或 继续当前发布） -->
-![发布总览](docs/screenshots/release-overview.png)
+![发布总览](/docs/screenshots/94AD073E-3017-4EAB-9B71-1A5AABC063FB.png)
 
-<!-- 创建发布单：目标版本选择 + 发布方式 + 自动执行 + 右侧发布预览 -->
-![创建发布单](docs/screenshots/order-create.png)
-
-<!-- 发布单详情：步骤流转 / 每步执行结果 / 节点快照（含创建时填写的参数）/ 留痕 / 回滚 / 终止 -->
-![发布单详情](docs/screenshots/order-detail.png)
-
-<!-- 发布单列表：全部发布单（进行中 / 已完成 / 已终止） -->
-![发布单列表](docs/screenshots/order-list.png)
 
 ### 工作区
 
-<!-- 首页：平台总览与快捷入口 -->
-![首页](docs/screenshots/home.png)
-
 <!-- 知识库：文档 / 切片 / 检索验证 -->
-![知识库](docs/screenshots/knowledge.png)
+![知识库](/docs/screenshots/18981D47-ACB3-4966-9EA9-F51E35E00457.png)
 
 <!-- 对话：Agent 对话与工具调用 -->
-![对话](docs/screenshots/chat.png)
+![对话](/docs/screenshots/E8756D92-F190-4D63-A025-2D5E2D164E31.png)
 
 <!-- 评测：基准集 / 回归 / 安全评测 -->
-![评测](docs/screenshots/evaluation.png)
+![评测](/docs/screenshots/37A2479D-3979-4EAF-BDDB-33FFB4285CB0.png)
 
 <!-- 任务记录：Agent Run 列表与详情 -->
-![任务记录](docs/screenshots/runs.png)
+![任务记录](/docs/screenshots/075D96D1-63A1-49B1-856F-E727DDE7FAE4.png)
 
 ### 治理与管理
 
 <!-- 用户管理：用户与角色分配 -->
-![用户管理](docs/screenshots/users.png)
+![用户管理](/docs/screenshots/D39071E8-4590-4CE9-AA23-B48BC437A1C4.png)
 
 <!-- 权限策略：角色 / 策略 -->
-![权限策略](docs/screenshots/policies.png)
+![权限策略](/docs/screenshots/90749DE7-7884-425A-8CB7-6A60638B211E.png)
 
 <!-- 操作记录：审计日志 -->
-![操作记录](docs/screenshots/audit.png)
+![操作记录](/docs/screenshots/3ECF64CB-974A-4BB7-ABD9-4309AE540BD1.png)
 
 <!-- 任务队列：队列运维 -->
-![任务队列](docs/screenshots/queue.png)
+![任务队列](/docs/screenshots/32BB8C30-698D-49A3-AE87-5441EEA35DAE.png)
 
 <!-- 事件：事件流 -->
-![事件](docs/screenshots/events.png)
+![事件](/docs/screenshots/FA7F906B-34D1-4AE5-BBDB-DCC5DBC527CA.png)
 
 <!-- 数据生命周期：数据保留与清理 -->
-![数据生命周期](docs/screenshots/data.png)
+![数据生命周期](/docs/screenshots/1FB0BB81-55E1-4F66-9CCC-657E9D562C61.png)
 
 <!-- 配置中心：运行时配置 -->
-![配置中心](docs/screenshots/settings.png)
+![配置中心](/docs/screenshots/401F7F49-97AE-4A9D-A418-45340CA03805.png)
 
 <!-- 模型健康：模型状态与限流 -->
 ![模型健康](docs/screenshots/model.png)
 
 <!-- 成本：成本统计与趋势 -->
-![成本](docs/screenshots/cost.png)
+![成本](/docs/screenshots/E45F88F5-0617-4931-A632-E4802E692B8F.png)
 
 <!-- 工具：工具注册与管理 -->
-![工具](docs/screenshots/tools.png)
+![工具](/docs/screenshots/9F4BF39F-8BD7-47E1-8760-879F12F2EE54.png)
 
 <!-- 审批：待审批事项 -->
-![审批](docs/screenshots/approvals.png)
+![审批](/docs/screenshots/C0BEE9D8-D6D4-435B-AC7B-A7429A173762.png)
 
 <!-- 历史记忆：Agent 记忆回放 -->
-![历史记忆](docs/screenshots/memory.png)
+![历史记忆](/docs/screenshots/14FFEFF5-8869-4A9F-9723-1357897A5B95.png)
 
 <!-- 关系图谱：实体与关系 -->
-![关系图谱](docs/screenshots/graph.png)
+![关系图谱](/docs/screenshots/986387A3-2401-498D-9053-E02EF8B98F69.png)
 
 ## 测试与检查
 
