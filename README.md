@@ -81,6 +81,35 @@ schema.sql          全量表结构参考
 - **灰度与 Canary**（§57）：百分比 + 用户哈希放量，指标恶化自动停 / 回滚
 - **RBAC 权限**：角色 / 策略 / 用户，管理能力看「管理员」角色
 
+## 界面预览
+
+> 截图放在 `docs/screenshots/`，markdown 里用相对路径引用即可，GitHub 会自动渲染。
+> 没图的地方先空着，有截图再补。
+
+### 发布
+
+发布总览 / 创建发布单 / 发布单详情 / 发布单列表，按发布流主线操作。
+
+<!-- 发布总览：当前 Agent / 当前版本 / 发布状态 / 主流程步骤条 / 主按钮（创建发布单 或 继续当前发布） -->
+![发布总览](docs/screenshots/release-overview.png)
+
+<!-- 创建发布单：目标版本选择 + 发布方式 + 自动执行 + 右侧发布预览 -->
+![创建发布单](docs/screenshots/order-create.png)
+
+<!-- 发布单详情：步骤流转 / 每步执行结果 / 节点快照（含创建时填写的参数）/ 留痕 / 回滚 / 终止 -->
+![发布单详情](docs/screenshots/order-detail.png)
+
+<!-- 发布单列表：全部发布单（进行中 / 已完成 / 已终止） -->
+![发布单列表](docs/screenshots/order-list.png)
+
+### 治理与监控
+
+<!-- 权限策略 / 用户角色 -->
+![权限与用户](docs/screenshots/governance.png)
+
+<!-- 模型健康 / 成本监控 -->
+![模型健康与成本](docs/screenshots/model-cost.png)
+
 ## 测试与检查
 
 ```bash
