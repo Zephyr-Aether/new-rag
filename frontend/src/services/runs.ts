@@ -5,16 +5,17 @@ export const runsApi = {
 // Runs
   listRuns: (limit = 50, offset = 0, state = '') =>
     get<{ runs: Run[]; total: number }>(`/agents/runs?limit=${limit}&offset=${offset}${state ? `&state=${encodeURIComponent(state)}` : ''}`),
-  createRun: (input: string, awaitResult = true, opts: { sessionId?: string; history?: { role: string; content: string }[] } = {}) =>
+  createRun: (input: string, awaitResult = true, opts: { sessionId?: string; history?: { role: string; content: string }[]; clientRunId?: string } = {}) =>
     post<Run>('/agents/runs', {
       input,
       await_result: awaitResult,
       session_id: opts.sessionId,
       history: opts.history,
+      client_run_id: opts.clientRunId,
     }),
   streamRun: async (
     input: string,
-    opts: { sessionId?: string; history?: { role: string; content: string }[] } = {},
+    opts: { sessionId?: string; history?: { role: string; content: string }[]; clientRunId?: string } = {},
     onEvent: (e: StreamEvent) => void,
     signal?: AbortSignal,
   ): Promise<{ run_id: string; state: string }> => {
@@ -22,7 +23,7 @@ export const runsApi = {
     const res = await fetch('/agents/runs/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-      body: JSON.stringify({ input, session_id: opts.sessionId, history: opts.history }),
+      body: JSON.stringify({ input, session_id: opts.sessionId, history: opts.history, client_run_id: opts.clientRunId }),
       signal,
     })
     if (!res.ok || !res.body) {
@@ -65,7 +66,7 @@ export const runsApi = {
       '/agents/sessions',
     ),
   sessionMessages: (id: string) =>
-    get<{ session_id: string; messages: { id: string; role: string; content: string; tools: { tool_ref: string; ok: boolean }[]; docs: string[] }[] }>(
+    get<{ session_id: string; messages: { id: string; role: string; content: string; state?: string; tools: { tool_ref: string; ok: boolean }[]; docs: string[] }[] }>(
       `/agents/sessions/${encodeURIComponent(id)}/messages`,
     ),
   sessionMessageDelete: (sid: string, mid: string) =>

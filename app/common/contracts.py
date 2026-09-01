@@ -32,6 +32,7 @@ class RunInput(BaseModel):
     model: str | None = None  # 覆盖默认模型
     retrieval_top_k: int | None = None  # 检索 top_k 覆盖（§60 Replay 换检索参数）
     history: list[dict] | None = None  # §10 历史轮次（近轮原文，旧轮由 runtime 压缩为摘要）
+    client_run_id: str | None = None  # §32.5 幂等键：重试同一请求不重复建 run
 
 
 class RunResult(BaseModel):

@@ -1,7 +1,7 @@
 """Knowledge API（§32 MVP 子集）：
 
 POST /knowledge/documents    ingest 一篇 Markdown 文档（解析→分块→embedding→入库）
-POST /knowledge/documents/upload   上传文件（TXT/MD/PDF/CSV/Excel）解析后入库
+POST /knowledge/documents/upload   上传文件（TXT/MD/PDF/DOC/DOCX/CSV/Excel）解析后入库
 POST /knowledge/search       混合检索（向量 + BM25 + RRF）
 """
 
@@ -203,7 +203,7 @@ async def upload_document(
     document_id: str = Form(""),
     kb_id: str = Form("default"),
 ) -> dict:
-    """§15.4 上传文件解析入库：TXT/Markdown/PDF 直接入库；CSV/Excel 按（问题,答案）转 FAQ。"""
+    """§15.4 上传文件解析入库：TXT/Markdown/PDF/DOC/DOCX 直接入库；CSV/Excel 按（问题,答案）转 FAQ。"""
     state: AppState = request.app.state.agent
     data = await file.read()
     if not data:

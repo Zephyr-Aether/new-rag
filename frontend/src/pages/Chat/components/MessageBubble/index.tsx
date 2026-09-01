@@ -5,24 +5,27 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Badge } from '@/components'
 import { ChatMsg } from '../../type/chat'
-import { normalizeContent } from '../../util/chat'
+import { closeUnclosedFence, normalizeContent } from '../../util/chat'
 
-export const MessageBubble = memo(function MessageBubble({ m, openTools, openCitations, onToggleTools, onToggleCitations, onRegenerate, onDeleteMessage }: {
+export const MessageBubble = memo(function MessageBubble({ m, openTools, openCitations, onToggleTools, onToggleCitations, onRegenerate, onRetry, onDeleteMessage }: {
   m: ChatMsg
   openTools: boolean
   openCitations: boolean
   onToggleTools: (id: number) => void
   onToggleCitations: (id: number) => void
   onRegenerate: () => void
+  onRetry: () => void
   onDeleteMessage: (m: ChatMsg) => void
 }) {
   const [copied, setCopied] = useState(false)
-  const content = m.role === 'assistant' ? normalizeContent(m.content) : m.content
+  const raw = m.role === 'assistant' ? normalizeContent(m.content) : m.content
+  // 流式期间补闭合 fence，避免未闭合代码块吞掉后续内容造成页面跳动；复制/最终态用原始文本
+  const content = m.running && m.role === 'assistant' ? closeUnclosedFence(raw) : raw
   const visibleTools = (m.tools ?? []).filter((t) => t.tool_ref && t.tool_ref.trim())
   const visibleDocs = (m.docs ?? []).map((d) => d.trim()).filter(Boolean)
   function copyContent() {
-    if (!content) return
-    navigator.clipboard?.writeText(content).then(() => setCopied(true), () => undefined)
+    if (!raw) return
+    navigator.clipboard?.writeText(raw).then(() => setCopied(true), () => undefined)
   }
   return (
     <div className={`chat-msg ${m.role}`}>
@@ -38,6 +41,7 @@ export const MessageBubble = memo(function MessageBubble({ m, openTools, openCit
           content
         )}
         {m.running && <span className="chat-thinking">…</span>}
+        {m.interrupted && <div className="chat-meta-line">已停止，内容不完整</div>}
         {visibleTools.length > 0 && (
           <div className="chat-tools">
             <div className="chat-tools-head">
@@ -97,6 +101,7 @@ export const MessageBubble = memo(function MessageBubble({ m, openTools, openCit
               </Link>
             )}
             {m.role === 'assistant' && <a className="link" onClick={onRegenerate}>重新生成</a>}
+            {m.retriable && <a className="link" onClick={onRetry}>重试</a>}
             {!m.running && (
               <>
                 <a className="link" onClick={copyContent}>{copied ? '已复制' : '复制'}</a>

@@ -33,6 +33,7 @@ class RunStore(IdempotencyStore):
         model_config: dict,
         input_json: dict,
         replay_of: str | None = None,
+        client_run_id: str | None = None,
     ) -> None:
         async with self.sessions() as s:
             s.add(
@@ -48,9 +49,41 @@ class RunStore(IdempotencyStore):
                     model_config=json.dumps(model_config),
                     input_json=json.dumps(input_json),
                     replay_of=replay_of,
+                    client_run_id=client_run_id,
                 )
             )
             await s.commit()
+
+    async def get_run_by_client_id(self, tenant_id: str, client_run_id: str) -> dict | None:
+        """幂等查询：按租户 + 客户端 key 取已提交的 run（§32.5）。"""
+        async with self.sessions() as s:
+            row = await s.scalar(
+                select(AgentRunRow)
+                .where(
+                    AgentRunRow.tenant_id == tenant_id,
+                    AgentRunRow.client_run_id == client_run_id,
+                )
+                .order_by(AgentRunRow.started_at.desc())
+            )
+            if row is None:
+                return None
+            return {
+                "run_id": row.run_id,
+                "tenant_id": row.tenant_id,
+                "user_id": row.user_id,
+                "agent_id": row.agent_id,
+                "agent_version": row.agent_version,
+                "session_id": row.session_id,
+                "state": row.state,
+                "cost": row.cost,
+                "tokens_in": row.tokens_in,
+                "tokens_out": row.tokens_out,
+                "input_json": row.input_json,
+                "output_json": row.output_json,
+                "error_json": row.error_json,
+                "replay_of": row.replay_of,
+                "finished_at": row.finished_at,
+            }
 
     async def get_run(self, run_id: str) -> dict | None:
         async with self.sessions() as s:

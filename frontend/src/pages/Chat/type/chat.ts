@@ -15,6 +15,12 @@ export interface ChatMsg {
   state?: string
   runId?: string
   running?: boolean
+  /** 流式被用户中断（停止）或连接中断，内容不完整。 */
+  interrupted?: boolean
+  /** 幂等键：该用户消息对应的 run 请求（重试复用，重新生成换新）。 */
+  clientRunId?: string
+  /** 网络/接口失败可「重试」（复用同一 client_run_id，服务端去重）。 */
+  retriable?: boolean
 }
 
 export interface SessionItem {

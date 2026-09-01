@@ -514,14 +514,14 @@ export default function Knowledge() {
           )}
 
           <div className="mt" style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-            <div className="mb" style={{ fontWeight: 600 }}>上传文件（TXT / Markdown / PDF / CSV / Excel）</div>
+            <div className="mb" style={{ fontWeight: 600 }}>上传文件（TXT / Markdown / PDF / Word / CSV / Excel）</div>
             <Field label="标题（可选，留空用文件名）">
               <input value={upTitle} onChange={(e) => setUpTitle(e.target.value)} placeholder="产品手册" />
             </Field>
             <Upload.Dragger
               multiple={false}
               showUploadList={false}
-              accept=".txt,.md,.markdown,.pdf,.csv,.xlsx,.xls"
+              accept=".txt,.md,.markdown,.pdf,.doc,.docx,.csv,.xlsx"
               customRequest={async ({ file, onProgress, onSuccess, onError }) => {
                 try {
                   const f = file as File

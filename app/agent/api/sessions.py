@@ -99,6 +99,7 @@ async def get_session_messages(
                     "id": m.id,
                     "role": m.role,
                     "content": m.content,
+                    "state": m.state,
                     "tools": json.loads(m.tools_json or "[]"),
                     "docs": json.loads(m.docs_json or "[]"),
                 }
@@ -212,6 +213,7 @@ async def persist_chat_messages(state: AppState, run_id: str) -> None:
                     session_id=session_id,
                     role="assistant",
                     content=answer,
+                    state=run.get("state"),  # 中断/失败消息在历史里可被标记
                     tools_json=json.dumps(tools, ensure_ascii=False),
                     docs_json=json.dumps(docs, ensure_ascii=False),
                     seq=seq0 + 1,

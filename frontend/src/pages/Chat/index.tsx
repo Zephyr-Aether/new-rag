@@ -8,7 +8,7 @@ import { FlowChain, PageHeader } from '@/components/Page'
 import { MessageBubble } from './components/MessageBubble'
 import { SessionItemView } from './components/SessionItemView'
 import { ChatMsg, SessionItem, ToolCallView } from './type/chat'
-import { normalizeContent } from './util/chat'
+import { budgetHistory, normalizeContent } from './util/chat'
 
 let seq = 1
 const QUICK_PROMPTS = [
@@ -33,6 +33,8 @@ export default function Chat() {
   const [renameTitle, setRenameTitle] = useState('')
   const [uploadErr, setUploadErr] = useState('')
   const abortRef = useRef<AbortController | null>(null)
+  // 请求令牌：每次 send 自增，回调/清理只在令牌仍最新时生效，隔离过期请求的迟到事件
+  const tokenRef = useRef(0)
   const fileRef = useRef<HTMLInputElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const messagesRef = useRef(messages)
@@ -71,6 +73,9 @@ export default function Chat() {
           mid: m.id,
           role: m.role === 'assistant' ? 'assistant' : 'user',
           content: normalizeContent(m.content),
+          state: m.state,
+          // 服务端持久化的中断/失败状态 → 历史里也能显示「已停止」
+          interrupted: m.state === 'CANCELLED',
           tools: m.tools ?? [],
           docs: m.docs ?? [],
           running: false,
@@ -125,28 +130,36 @@ export default function Chat() {
     setMessages((prev) => prev.filter((x) => x.id !== m.id))
   }, [currentSid])
 
-  async function send(e?: FormEvent, retry?: string) {
+  async function send(e?: FormEvent, retry?: string, opts: { clientRunId?: string } = {}) {
     if (e) e.preventDefault()
     const text = (retry ?? input).trim()
     if (!text || busy) return
     if (!retry) setInput('')
+    const rid = tokenRef.current + 1
+    tokenRef.current = rid
+    // §32.5 幂等键：普通发送/重新生成为新键，重试复用原键让服务端去重
+    const clientRunId = opts.clientRunId ?? crypto.randomUUID()
     setBusy(true)
     setActiveRunId('')
     abortRef.current = new AbortController()
 
-    const history: { role: string; content: string }[] = messages.map((m) => ({ role: m.role, content: m.content }))
-    const userMsg: ChatMsg = { id: seq++, role: 'user', content: text }
+    const history = budgetHistory(messages.map((m) => ({ role: m.role, content: m.content })))
+    const userMsg: ChatMsg = { id: seq++, role: 'user', content: text, clientRunId }
     const asstId = seq
     seq++
     const asstMsg: ChatMsg = { id: asstId, role: 'assistant', content: '', running: true }
     setMessages((prev) => [...prev, userMsg, asstMsg])
-    const patch = (p: Partial<ChatMsg>) =>
+    // 只有仍是最新一次请求的回调才允许写入，过期请求的迟到事件直接丢弃
+    const patch = (p: Partial<ChatMsg>) => {
+      if (tokenRef.current !== rid) return
       setMessages((prev) => prev.map((m) => (m.id === asstId ? { ...m, ...p } : m)))
+    }
     const tools: ToolCallView[] = []
-    // 流式 token 批次刷新：避免逐 token 全量重渲染（长答案几百次 → 几十次）
     let tokenBuf = ''
+    let finished = false
+    // 流式 token 批次刷新：避免逐 token 全量重渲染（长答案几百次 → 几十次）
     const flushToken = () => {
-      if (!tokenBuf) return
+      if (!tokenBuf || tokenRef.current !== rid) return
       const chunk = tokenBuf
       tokenBuf = ''
       setMessages((prev) => prev.map((m) => (m.id === asstId ? { ...m, content: normalizeContent(m.content + chunk) } : m)))
@@ -156,8 +169,9 @@ export default function Chat() {
     try {
       await api.streamRun(
         text,
-        { sessionId: currentSid, history },
+        { sessionId: currentSid, history, clientRunId },
         (ev: StreamEvent) => {
+          if (tokenRef.current !== rid) return
           if (ev.type === 'start') setActiveRunId(ev.run_id)
           else if (ev.type === 'tool_call') {
             const tool_ref = (ev.tool || '').trim()
@@ -183,23 +197,38 @@ export default function Chat() {
           } else if (ev.type === 'token') {
             tokenBuf += ev.text
           } else if (ev.type === 'done') {
+            finished = true
             if (ev.session_id) setCurrentSid(ev.session_id)
-            patch({ state: ev.state, runId: ev.run_id, running: false })
+            if (ev.answer != null) tokenBuf = '' // 内容由完整 answer 覆盖，丢弃未 flush 的零散 token
+            // answer 字段在幂等重放路径（只发 done 不回放 token）必须有内容；正常流式下也一致
+            patch(
+              ev.answer != null
+                ? { content: normalizeContent(ev.answer), state: ev.state, runId: ev.run_id, running: false }
+                : { state: ev.state, runId: ev.run_id, running: false },
+            )
             loadSessions()
           } else if (ev.type === 'error') {
-            patch({ content: `出错了：${ev.message}`, running: false })
+            finished = true
+            patch({ content: `出错了：${ev.message}`, state: 'FAILED', retriable: true, running: false })
           }
         },
         abortRef.current.signal,
       )
     } catch (err) {
-      patch({ content: `出错了：${(err as Error).message}`, running: false })
+      // 正常流式阶段的 AbortError 已被 streamRun 吞掉；这里兜底 fetch 阶段（响应头未返回就停止）
+      if ((err as Error).name === 'AbortError') return
+      finished = true
+      patch({ content: `出错了：${(err as Error).message}`, state: 'FAILED', retriable: true, running: false })
     } finally {
       clearInterval(tokenTimer)
       flushToken()
-      setBusy(false)
-      setActiveRunId('')
-      abortRef.current = null
+      if (tokenRef.current === rid) {
+        // 流正常返回但没收到 done/error → 用户停止或连接中断，落账为「已中断」
+        if (!finished) patch({ interrupted: true, state: 'INTERRUPTED', running: false })
+        setBusy(false)
+        setActiveRunId('')
+        abortRef.current = null
+      }
     }
   }
 
@@ -211,6 +240,18 @@ export default function Chat() {
     const idx = msgs.findIndex((m) => m.id === lastUser.id)
     setMessages((prev) => prev.slice(0, idx + 1)) // 保留到最后一个用户消息
     void send(undefined, lastUser.content)
+  }, [busy])
+
+  const retryMessage = useCallback((m: ChatMsg) => {
+    if (busy) return
+    const msgs = messagesRef.current
+    const idx = msgs.findIndex((x) => x.id === m.id)
+    if (idx < 0) return
+    const userMsg = [...msgs].slice(0, idx).reverse().find((x) => x.role === 'user')
+    if (!userMsg) return
+    // 截到用户消息，复用同一 client_run_id 重发 → 服务端去重，不重复执行
+    setMessages((prev) => prev.slice(0, prev.findIndex((x) => x.id === userMsg.id) + 1))
+    void send(undefined, userMsg.content, { clientRunId: userMsg.clientRunId })
   }, [busy])
 
   const toggleTools = useCallback((id: number) => {
@@ -347,6 +388,7 @@ export default function Chat() {
                   onToggleTools={toggleTools}
                   onToggleCitations={toggleCitations}
                   onRegenerate={regenerate}
+                  onRetry={() => retryMessage(m)}
                   onDeleteMessage={deleteMessage}
                 />
               ))
@@ -360,7 +402,7 @@ export default function Chat() {
                 ref={fileRef}
                 type="file"
                 hidden
-                accept=".txt,.md,.pdf,.csv,.xlsx,.docx"
+                accept=".txt,.md,.pdf,.doc,.docx,.csv,.xlsx"
                 onChange={(e) => {
                   const f = e.target.files?.[0]
                   if (f) void uploadFile(f)

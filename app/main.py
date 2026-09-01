@@ -405,8 +405,9 @@ def create_app() -> FastAPI:
         async def _agent_run_handler(raw_payload: dict) -> None:
             # §57 队列消息 schema 演进：旧 payload 迁移到当前结构（新旧 Worker 共存）
             payload = migrate_agent_run_payload(raw_payload)
+            run_input = RunInput(**payload["run_input"])
             await execute_run(
-                RunInput(**payload["run_input"]),
+                run_input,
                 deps,
                 run_id=payload["run_id"],
                 agent_version=payload["agent_version"],
@@ -414,6 +415,7 @@ def create_app() -> FastAPI:
                 budget=ExecutionBudget(**payload["budget"]),
                 release_status=payload.get("release_status"),
                 frozen=payload.get("frozen_versions"),  # §22.1 版本冻结
+                client_run_id=run_input.client_run_id,
             )
             from app.agent.api.sessions import persist_chat_messages
 

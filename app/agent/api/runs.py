@@ -19,6 +19,7 @@ from sqlalchemy import select
 from app.agent.api.sessions import persist_chat_messages
 from app.agent.runtime.budget import ExecutionBudget, default_budget_from_settings
 from app.agent.runtime.runtime import RuntimeDeps, execute_run, resume_run
+from app.agent.runtime.state import TERMINAL_STATES
 from app.common.contracts import RunInput, RunResult, Subject
 from app.common.errors import AgentError
 from app.gateway.deps import get_subject
@@ -28,6 +29,16 @@ from app.storage.models import AgentRow, AgentVersionRow, SessionRow
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
+_SSE_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+
+
+async def _sse_events(queue: asyncio.Queue[dict | None]):
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+        yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+
 
 class RunCreateRequest(BaseModel):
     input: str
@@ -36,6 +47,7 @@ class RunCreateRequest(BaseModel):
     model: str | None = None
     await_result: bool = True
     history: list[dict] | None = None  # §10 对话多轮：前序 user/assistant 消息
+    client_run_id: str | None = None  # §32.5 幂等键：重试同一请求不重复建 run
 
 
 class ReplayRequest(BaseModel):
@@ -147,6 +159,23 @@ async def create_run(
 ) -> RunResult:
     state: AppState = request.app.state.agent
     await _enforce_tenant_quota(state, subject.tenant_id)  # §16.3 租户并发配额
+    if body.client_run_id:
+        existing = await state.store.get_run_by_client_id(subject.tenant_id, body.client_run_id)
+        if existing is not None:
+            if existing["state"] in TERMINAL_STATES:
+                out = json.loads(existing["output_json"] or "{}")
+                return RunResult(
+                    run_id=existing["run_id"],
+                    tenant_id=existing["tenant_id"],
+                    user_id=existing["user_id"],
+                    agent_id=existing["agent_id"],
+                    agent_version=existing["agent_version"],
+                    session_id=existing["session_id"],
+                    state=existing["state"],
+                    answer=(out or {}).get("answer") if isinstance(out, dict) else None,
+                    steps=0,
+                )
+            raise AgentError("该请求已提交并在处理中，请勿重复提交", code="RUN_IN_PROGRESS")
     agent_id, agent_version, system_prompt, default_model, release_status = await _resolve_agent(
         state, subject.tenant_id, body.agent_id, user_id=subject.user_id
     )
@@ -160,6 +189,7 @@ async def create_run(
         text=body.input,
         model=body.model or default_model,
         history=body.history,  # §10 对话多轮上下文
+        client_run_id=body.client_run_id,
     )
     run_id = uuid.uuid4().hex
     budget = default_budget_from_settings(state.settings)
@@ -200,6 +230,7 @@ async def create_run(
         budget=budget,
         release_status=release_status,
         frozen=frozen,
+        client_run_id=body.client_run_id,
     )
     # §12.4 记忆自动沉淀：run 完成后提炼会话用户事实写入记忆（失败不影响返回）
     await _sediment_memory(state, subject, run_id)
@@ -224,6 +255,30 @@ async def stream_run(
     """
     state: AppState = request.app.state.agent
     await _enforce_tenant_quota(state, subject.tenant_id)
+    # §32.5 幂等：同 key 已提交过 → 终态直接回放，非终态拒绝重复执行
+    if body.client_run_id:
+        existing = await state.store.get_run_by_client_id(subject.tenant_id, body.client_run_id)
+        if existing is not None:
+            queue: asyncio.Queue[dict | None] = asyncio.Queue()
+            if existing["state"] in TERMINAL_STATES:
+                out = json.loads(existing["output_json"] or "{}")
+                await queue.put(
+                    {
+                        "type": "done",
+                        "run_id": existing["run_id"],
+                        "session_id": existing["session_id"],
+                        "state": existing["state"],
+                        "answer": (out or {}).get("answer") if isinstance(out, dict) else None,
+                    }
+                )
+            else:
+                await queue.put({"type": "error", "message": "该请求已提交并在处理中，请稍后重试"})
+            await queue.put(None)
+            return StreamingResponse(
+                _sse_events(queue),
+                media_type="text/event-stream",
+                headers=_SSE_HEADERS,
+            )
     agent_id, agent_version, system_prompt, default_model, release_status = await _resolve_agent(
         state, subject.tenant_id, body.agent_id, user_id=subject.user_id
     )
@@ -237,6 +292,7 @@ async def stream_run(
         text=body.input,
         model=body.model or default_model,
         history=body.history,
+        client_run_id=body.client_run_id,
     )
     run_id = uuid.uuid4().hex
     budget = default_budget_from_settings(state.settings)
@@ -261,6 +317,7 @@ async def stream_run(
                 release_status=release_status,
                 frozen=frozen,
                 emit=emit,
+                client_run_id=body.client_run_id,
             )
             await _sediment_memory(state, subject, run_id)
             await persist_chat_messages(state, run_id)  # §10 对话持久化
@@ -276,6 +333,13 @@ async def stream_run(
         except Exception as exc:  # noqa: BLE001 流式通道不因内部异常中断
             await persist_chat_messages(state, run_id)  # 失败也持久化，避免对话记录丢失
             await queue.put({"type": "error", "message": str(exc)})
+        except asyncio.CancelledError:
+            # 客户端断开：任务被取消，仍尽力落会话消息（局部内容/状态由 _drive_loop 先落 run）
+            try:
+                await asyncio.shield(persist_chat_messages(state, run_id))
+            except Exception:  # noqa: BLE001 尽力而为，不阻塞取消
+                pass
+            raise
         finally:
             await queue.put(None)
 
@@ -283,11 +347,8 @@ async def stream_run(
 
     async def sse():
         try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+            async for item in _sse_events(queue):
+                yield item
         finally:
             if not task.done():
                 task.cancel()
@@ -295,7 +356,7 @@ async def stream_run(
     return StreamingResponse(
         sse(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers=_SSE_HEADERS,
     )
 
 

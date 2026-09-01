@@ -297,6 +297,8 @@ async def _drive_loop(
     error: dict | None = None
     terminal = AgentState.FAILED
     loop_fp: deque = deque(maxlen=LOOP_FINGERPRINT_N)
+    # 当前步流式输出的 token 累积：取消/中断时把已流出的局部内容落账，避免对话历史变空消息
+    streamed: list[str] = []
     # §8.2 在途取消：watcher 监测 run 取消标志并设置 token，打断在途 LLM/工具调用
     token = CancellationToken()
 
@@ -307,6 +309,14 @@ async def _drive_loop(
                 return
             await asyncio.sleep(0.05)
 
+    async def _on_token(text: str) -> None:
+        streamed.append(text)
+        await _safe_emit(emit, {"type": "token", "text": text})
+
+    def _partial_answer() -> str | None:
+        partial = "".join(streamed).strip()
+        return partial or None
+
     watch = asyncio.create_task(_watch_cancel())
 
     # §10.4 上下文生命周期分层 + 预算：近轮原文、旧轮摘要、总量受约束（防 Context Overflow）
@@ -314,6 +324,7 @@ async def _drive_loop(
 
     try:
         while True:
+            streamed = []  # 每步重置：只保留当前步的流式内容
             spent.elapsed_s = time.monotonic() - start
             check = guard.check(spent)
             if check.exceeded:
@@ -325,6 +336,7 @@ async def _drive_loop(
                 terminal = AgentState.CANCELLED
                 error = {"code": "RUN_CANCELLED", "message": "cancelled by user"}
                 sm.transition(AgentState.CANCELLED, reason="user cancel")
+                answer = _partial_answer()  # 取消前已流出的局部内容落账
                 break
 
             # §10.3 用户暂停：步间检查，已落 checkpoint，resume 从断点续
@@ -355,11 +367,7 @@ async def _drive_loop(
                     spent=spent,
                     token=token,
                     tenant_id=subject.tenant_id,
-                    on_token=(
-                        lambda t: _safe_emit(emit, {"type": "token", "text": t})  # 流式 token
-                    )
-                    if emit is not None
-                    else None,
+                    on_token=_on_token if emit is not None else None,
                 )
                 sp.set_attribute("tokens_in", result.tokens_in)
                 sp.set_attribute("tokens_out", result.tokens_out)
@@ -525,6 +533,27 @@ async def _drive_loop(
     except RunCancelledError:
         terminal = AgentState.CANCELLED
         error = {"code": "RUN_CANCELLED", "message": "cancelled while in flight"}
+        answer = _partial_answer()  # 取消前已流出的局部内容落账
+    except asyncio.CancelledError:
+        # 客户端断开（SSE abort）会取消连接 handler → 任务被 cancel。CancelledError 是
+        # BaseException，except Exception 抓不到；这里无条件把 run 落 CANCELLED（含已流出的
+        # 局部内容），否则整轮消息都不会持久化、或状态停留在 RUNNING。
+        partial = _partial_answer()
+        try:
+            await asyncio.shield(
+                store.finish_run(
+                    run_id=run_id,
+                    state="CANCELLED",
+                    output_json={"answer": partial} if partial else None,
+                    error_json=None,
+                    tokens_in=spent.tokens_in,
+                    tokens_out=spent.tokens_out,
+                    cost=float(spent.cost),
+                )
+            )
+        except Exception:  # noqa: BLE001 尽力而为，不阻塞取消
+            pass
+        raise
     except ToolTimeoutError:
         # §3.4 工具超时结果未知：收敛到 UNKNOWN（待 reconcile，而非误判 FAILED）
         terminal = AgentState.UNKNOWN
@@ -576,6 +605,7 @@ async def execute_run(
     system_prompt: str,
     budget: ExecutionBudget,
     replay_of: str | None = None,
+    client_run_id: str | None = None,
     release_status: str | None = None,
     frozen: dict | None = None,
     emit: Callable[[dict], Awaitable[None]] | None = None,
@@ -619,6 +649,7 @@ async def execute_run(
         },
         input_json=request.model_dump(),
         replay_of=replay_of,
+        client_run_id=client_run_id,
     )
 
     if not await deps.lock.acquire(run_id):
