@@ -16,6 +16,7 @@ export function closeUnclosedFence(text: string) {
 /**
  * 历史预算：控制发给后端的上下文体积。服务端已有 token 级摘要压缩（§5.6），
  * 这里只做粗粒度裁剪（消息数 + 字符数双上限），避免请求体无限膨胀。
+ * 返回从完整一轮开始的列表：开头若被截断成裸 assistant（其 user 被裁掉），去掉以免上下文残缺。
  */
 export function budgetHistory(
   messages: { role: string; content: string }[],
@@ -29,5 +30,6 @@ export function budgetHistory(
     if (total > maxChars && kept.length > 0) break
     kept.unshift(recent[i])
   }
+  while (kept.length && kept[0].role !== 'user') kept.shift()
   return kept
 }

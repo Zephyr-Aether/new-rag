@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     budget_max_step_s: float = 120.0  # §9.1 分层超时：单步（LLM+工具）上限
     # §16.3 租户并发 run 上限（创建 run 时校验，超限拒绝）
     tenant_max_concurrent_runs: int = 20
+    # Phase 1 配额可视化（§66）：超限前可见，Dashboard /quotas 对照展示
+    tenant_max_users: int = 100  # 租户用户数上限
+    tenant_max_agents: int = 50  # 租户 Agent 数上限
+    tenant_max_runs_30d: int = 100_000  # 近 30 天 run 次数上限
 
     # ---- 队列（§11） ----
     # 队列深度监控采样间隔（秒）；后台定时落库供"队列深度随时间"趋势

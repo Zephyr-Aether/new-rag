@@ -4,6 +4,7 @@
 > 本文档是差距分析与分阶段路线，落地按 Phase 顺序执行；每一阶段有明确验收标准。
 
 > 面向客户/交付的文档入口：`docs/customer/`（快速开始 / 部署 / 管理员 / 集成 / 故障排查 / 安全），套餐边界见 `docs/commercial/pricing.md`。
+> 更细的执行拆解请看 `productization-roadmap.md`；当前功能优化清单请看 `feature-optimization-plan.md`。
 
 ## 执行进度
 

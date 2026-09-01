@@ -110,3 +110,28 @@ async def test_reconcile_with_bill_provider(sessions):
     )
     assert report["matched_bill"] == 1 and report["fallback_priced"] == 0
     assert report["total_actual"] == pytest.approx(0.009)
+
+
+async def test_quotas_aggregates_usage_and_limits(sessions):
+    """Phase 1 配额可视化：用量对照上限，percent/over 计算正确。"""
+    svc = CostService(
+        sessions,
+        settings=Settings(
+            database_url="sqlite+aiosqlite://",
+            llm_provider="mock",
+            tenant_max_runs_30d=10,
+        ),
+    )
+    await _seed_run_with_call(sessions, "rq", tokens_in=1000, tokens_out=2000, estimated=0.01)
+    rows = await svc.quotas(tenant_id="t")
+    by_key = {r["key"]: r for r in rows}
+
+    assert by_key["runs_30d"]["used"] == 1
+    assert by_key["tokens_30d"]["used"] == 3000
+    assert by_key["tokens_30d"]["limit"] is None
+    assert by_key["concurrent_runs"]["used"] == 0  # COMPLETED 不计入并发
+    assert by_key["users"]["over"] is False
+    assert by_key["users"]["limit"] == 100  # 默认上限
+    # 自定义上限 10 → 1/10 = 10%，未超限
+    assert by_key["runs_30d"]["percent"] == pytest.approx(10.0)
+    assert by_key["runs_30d"]["over"] is False

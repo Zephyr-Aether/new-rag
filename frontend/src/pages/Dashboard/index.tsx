@@ -30,6 +30,7 @@ export default function Dashboard() {
   const [runs, setRuns] = useState<Run[] | null>(null)
   const [docs, setDocs] = useState<DocRow[] | null>(null)
   const [versions, setVersions] = useState<Version[] | null>(null)
+  const [quotas, setQuotas] = useState<{ key: string; label: string; used: number; limit: number | null; percent: number | null; over: boolean }[] | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -39,6 +40,7 @@ export default function Dashboard() {
     api.kbBases().then((r) => alive && setKbCount(r.bases.length)).catch(() => undefined)
     api.listRuns(10).then((r) => alive && setRuns(r.runs)).catch(() => undefined)
     api.documents().then((r) => alive && setDocs(r.rows)).catch(() => undefined)
+    api.costQuotas().then((r) => alive && setQuotas(r.quotas)).catch(() => setQuotas(null))
     return () => {
       alive = false
     }
@@ -234,6 +236,28 @@ export default function Dashboard() {
                   <span className="home-state-value">{hasVersion ? `已有 v${latestVersion!.version}` : '等待首个版本'}</span>
                 </div>
               </div>
+              {quotas && quotas.some((q) => q.limit != null) && (
+                <div className="home-quota">
+                  <div className="home-quota-title">配额用量</div>
+                  {quotas.filter((q) => q.limit != null).map((q) => (
+                    <div className="home-quota-row" key={q.key}>
+                      <div className="home-quota-head">
+                        <span className="home-quota-label">{q.label}</span>
+                        <span className={`home-quota-value ${q.over ? 'over' : ''}`}>
+                          {q.used.toLocaleString()} / {q.limit!.toLocaleString()}
+                          {q.over && ' ⚠'}
+                        </span>
+                      </div>
+                      <div className="home-quota-bar">
+                        <div
+                          className={`home-quota-fill ${q.over ? 'over' : ''}`}
+                          style={{ width: `${Math.min((q.percent ?? 0), 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="home-panel-foot small muted">
                 这个首页不承担分析工作，只负责告诉你现在该去哪一页。
               </div>

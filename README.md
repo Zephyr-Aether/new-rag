@@ -165,4 +165,6 @@ make ci       # lint + test + chaos + smoke-auth
 
 - `CLAUDE.md` — 项目协作约定（写代码前先对照）
 - `docs/productization-plan.md` — 产品化计划
+- `docs/productization-roadmap.md` — 产品化详细路线图
+- `docs/feature-optimization-plan.md` — 当前功能优化计划
 - `docs/enterprise-agent-design.md` — 架构设计

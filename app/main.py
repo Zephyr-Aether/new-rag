@@ -209,6 +209,10 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         setup_otel(settings)
         engine, sessions = create_engine_and_sessions(settings.database_url)
+        # §Phase 0 生产启动预检：fail-fast，缺 DB/Redis/LLM/认证配置直接阻断并列出缺失项
+        from app.common.preflight import preflight_or_raise
+
+        await preflight_or_raise(settings)
         # §57.4 迁移优先：alembic 管理的库先 upgrade head（避免 create_all 先建表，
         # 导致待执行迁移重复建表冲突）；create_all 新库/测试库无 alembic_version，跳过
         if settings.environment != "test":

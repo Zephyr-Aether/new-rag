@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Paperclip, Send, Square } from 'lucide-react'
 import { api, MAX_UPLOAD_BYTES, StreamEvent } from '@/services'
-import { Button, Field, Modal } from '@/components'
+import { Button, ErrorBox, Field, Modal } from '@/components'
 import { useConfirm } from '@/components/Confirm'
 import { FlowChain, PageHeader } from '@/components/Page'
 import { MessageBubble } from './components/MessageBubble'
@@ -36,11 +36,49 @@ export default function Chat() {
   // 请求令牌：每次 send 自增，回调/清理只在令牌仍最新时生效，隔离过期请求的迟到事件
   const tokenRef = useRef(0)
   const fileRef = useRef<HTMLInputElement>(null)
-  const endRef = useRef<HTMLDivElement>(null)
+  const streamRef = useRef<HTMLDivElement>(null)
   const messagesRef = useRef(messages)
+  // 滚动跟随：贴底才自动滚，用户上翻时停止跟随并显示「回到底部」
+  const [stickToBottom, setStickToBottom] = useState(true)
+  const [showJumpBottom, setShowJumpBottom] = useState(false)
+  // 会话搜索 + 置顶（置顶本地持久化）
+  const [sessionQuery, setSessionQuery] = useState('')
+  const [pinnedSids, setPinnedSids] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('chat.pinned') ?? '[]') as string[]
+    } catch {
+      return []
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('chat.pinned', JSON.stringify(pinnedSids))
+    } catch { /* 忽略存储异常 */ }
+  }, [pinnedSids])
+  const togglePin = useCallback((sid: string) => {
+    setPinnedSids((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]))
+  }, [])
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
+  useEffect(() => {
+    // 消息变化（流式/切换会话）时贴底才跟随；用 auto 避免流式期间多次平滑动画
+    const el = streamRef.current
+    if (el && stickToBottom) el.scrollTop = el.scrollHeight
+  }, [messages, stickToBottom])
+  const handleStreamScroll = useCallback(() => {
+    const el = streamRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    setStickToBottom(nearBottom)
+    setShowJumpBottom(!nearBottom)
+  }, [])
+  const jumpToBottom = useCallback(() => {
+    const el = streamRef.current
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    setStickToBottom(true)
+    setShowJumpBottom(false)
+  }, [])
 
   function loadSessions() {
     api.sessions().then((r) => setSessions(r.sessions)).catch(() => setSessions([]))
@@ -58,9 +96,6 @@ export default function Chat() {
     api.documents().then((r) => setKbInfo((p) => ({ bases: p?.bases ?? 0, docs: r.rows.length }))).catch(() => undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
 
   const openSession = useCallback(async (sid: string) => {
     if (busy) return
@@ -121,14 +156,21 @@ export default function Chat() {
     loadSessions()
   }
 
-  const deleteMessage = useCallback(async (m: ChatMsg) => {
-    if (!currentSid || !m.mid) {
-      setMessages((prev) => prev.filter((x) => x.id !== m.id))
-      return
-    }
-    await api.sessionMessageDelete(currentSid, m.mid)
-    setMessages((prev) => prev.filter((x) => x.id !== m.id))
-  }, [currentSid])
+  const deleteMessage = useCallback((m: ChatMsg) => {
+    confirm(
+      '删除消息',
+      '确定删除这条消息吗？仅从当前会话移除，不影响知识库内容。',
+      async () => {
+        if (!currentSid || !m.mid) {
+          setMessages((prev) => prev.filter((x) => x.id !== m.id))
+          return
+        }
+        await api.sessionMessageDelete(currentSid, m.mid)
+        setMessages((prev) => prev.filter((x) => x.id !== m.id))
+      },
+      { danger: true, confirmText: '删除' },
+    )
+  }, [currentSid, confirm])
 
   async function send(e?: FormEvent, retry?: string, opts: { clientRunId?: string } = {}) {
     if (e) e.preventDefault()
@@ -167,58 +209,71 @@ export default function Chat() {
     const tokenTimer = setInterval(flushToken, 50)
 
     try {
-      await api.streamRun(
-        text,
-        { sessionId: currentSid, history, clientRunId },
-        (ev: StreamEvent) => {
-          if (tokenRef.current !== rid) return
-          if (ev.type === 'start') setActiveRunId(ev.run_id)
-          else if (ev.type === 'tool_call') {
-            const tool_ref = (ev.tool || '').trim()
-            if (!tool_ref) return
-            tools.push({ tool_ref })
-            patch({ tools: [...tools] })
-          } else if (ev.type === 'tool_result') {
-            const tool_ref = (ev.tool || '').trim()
-            if (!tool_ref) return
-            const t = tools.find((x) => x.tool_ref === tool_ref)
-            if (t) t.ok = ev.ok
-            patch({ tools: [...tools] })
-            if (ev.docs && ev.docs.length) {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === asstId ? { ...m, docs: [...new Set([...(m.docs ?? []), ...ev.docs!])] } : m,
-                ),
-              )
-            }
-          } else if (ev.type === 'answer') {
-            tokenBuf = '' // answer 是完整答案，直接替换，丢弃缓冲的零散 token
-            patch({ content: normalizeContent(ev.answer) })
-          } else if (ev.type === 'token') {
-            tokenBuf += ev.text
-          } else if (ev.type === 'done') {
-            finished = true
-            if (ev.session_id) setCurrentSid(ev.session_id)
-            if (ev.answer != null) tokenBuf = '' // 内容由完整 answer 覆盖，丢弃未 flush 的零散 token
-            // answer 字段在幂等重放路径（只发 done 不回放 token）必须有内容；正常流式下也一致
-            patch(
-              ev.answer != null
-                ? { content: normalizeContent(ev.answer), state: ev.state, runId: ev.run_id, running: false }
-                : { state: ev.state, runId: ev.run_id, running: false },
-            )
-            loadSessions()
-          } else if (ev.type === 'error') {
-            finished = true
-            patch({ content: `出错了：${ev.message}`, state: 'FAILED', retriable: true, running: false })
+      let attempt = 0
+      for (;;) {
+        try {
+          await api.streamRun(
+            text,
+            { sessionId: currentSid, history, clientRunId },
+            (ev: StreamEvent) => {
+              if (tokenRef.current !== rid) return
+              if (ev.type === 'start') setActiveRunId(ev.run_id)
+              else if (ev.type === 'tool_call') {
+                const tool_ref = (ev.tool || '').trim()
+                if (!tool_ref) return
+                tools.push({ tool_ref })
+                patch({ tools: [...tools] })
+              } else if (ev.type === 'tool_result') {
+                const tool_ref = (ev.tool || '').trim()
+                if (!tool_ref) return
+                const t = tools.find((x) => x.tool_ref === tool_ref)
+                if (t) t.ok = ev.ok
+                patch({ tools: [...tools] })
+                if (ev.docs && ev.docs.length) {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === asstId ? { ...m, docs: [...new Set([...(m.docs ?? []), ...ev.docs!])] } : m,
+                    ),
+                  )
+                }
+              } else if (ev.type === 'answer') {
+                tokenBuf = '' // answer 是完整答案，直接替换，丢弃缓冲的零散 token
+                patch({ content: normalizeContent(ev.answer) })
+              } else if (ev.type === 'token') {
+                tokenBuf += ev.text
+              } else if (ev.type === 'done') {
+                finished = true
+                if (ev.session_id) setCurrentSid(ev.session_id)
+                if (ev.answer != null) tokenBuf = '' // 内容由完整 answer 覆盖，丢弃未 flush 的零散 token
+                // answer 字段在幂等重放路径（只发 done 不回放 token）必须有内容；正常流式下也一致
+                patch(
+                  ev.answer != null
+                    ? { content: normalizeContent(ev.answer), state: ev.state, runId: ev.run_id, running: false }
+                    : { state: ev.state, runId: ev.run_id, running: false },
+                )
+                loadSessions()
+              } else if (ev.type === 'error') {
+                finished = true
+                patch({ content: '', error: ev.message, state: 'FAILED', retriable: true, running: false })
+              }
+            },
+            abortRef.current.signal,
+          )
+          break
+        } catch (err) {
+          // 正常流式阶段的 AbortError 已被 streamRun 吞掉；这里兜底 fetch 阶段（响应头未返回就停止）
+          if ((err as Error).name === 'AbortError') return
+          // 网络抖动自动重连一次（同一 client_run_id，服务端幂等去重不会重复执行）
+          if (attempt === 0 && !finished) {
+            attempt = 1
+            tokenBuf = '' // 丢弃可能已缓冲的半截 token，等重连后重新流
+            continue
           }
-        },
-        abortRef.current.signal,
-      )
-    } catch (err) {
-      // 正常流式阶段的 AbortError 已被 streamRun 吞掉；这里兜底 fetch 阶段（响应头未返回就停止）
-      if ((err as Error).name === 'AbortError') return
-      finished = true
-      patch({ content: `出错了：${(err as Error).message}`, state: 'FAILED', retriable: true, running: false })
+          finished = true
+          patch({ content: '', error: (err as Error).message, state: 'FAILED', retriable: true, running: false })
+          break
+        }
+      }
     } finally {
       clearInterval(tokenTimer)
       flushToken()
@@ -254,6 +309,24 @@ export default function Chat() {
     void send(undefined, userMsg.content, { clientRunId: userMsg.clientRunId })
   }, [busy])
 
+  // 继续生成：把已输出的局部内容作为上下文，让模型从断点接着写（区别于重新生成的整条重跑）
+  const continueMessage = useCallback((m: ChatMsg) => {
+    if (busy) return
+    const partial = m.content.trim()
+    if (!partial) return
+    void send(undefined, `请从上一条未完成的回答末尾继续，不要重复已输出的内容。\n\n未完成内容：\n${partial}`)
+  }, [busy])
+
+  // 用户反馈：有用/无用 → 落 run 反馈（回流评测数据集）
+  const feedbackMessage = useCallback((m: ChatMsg, fb: 'good' | 'bad') => {
+    if (!m.runId || m.feedback) return
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, feedback: fb } : x)))
+    api.runFeedback(m.runId, fb).catch(() => {
+      // 接口失败则回滚标记，允许重试
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, feedback: undefined } : x)))
+    })
+  }, [])
+
   const toggleTools = useCallback((id: number) => {
     setOpenTools((prev) => ({ ...prev, [id]: !prev[id] }))
   }, [])
@@ -261,6 +334,9 @@ export default function Chat() {
   const toggleCitations = useCallback((id: number) => {
     setOpenCitations((prev) => ({ ...prev, [id]: !prev[id] }))
   }, [])
+
+  // 右侧引用来源：超过 6 篇折叠
+  const [expandRefs, setExpandRefs] = useState(false)
 
   async function uploadFile(f: File) {
     if (busy || uploading) return
@@ -300,6 +376,22 @@ export default function Chat() {
   const lastTools = (lastAssistant?.tools ?? []).filter((t) => t.tool_ref && t.tool_ref.trim())
   const lastDocs = (lastAssistant?.docs ?? []).map((d) => d.trim()).filter(Boolean)
 
+  // 最近一次 run 的 token/成本（可观测）
+  const [runCost, setRunCost] = useState<{ tokens_in: number; tokens_out: number; estimated_cost: number } | null>(null)
+  useEffect(() => {
+    const rid = lastAssistant?.runId
+    if (!rid) {
+      setRunCost(null)
+      return
+    }
+    let alive = true
+    api
+      .runCost(rid)
+      .then((r) => { if (alive) setRunCost(r.totals) })
+      .catch(() => { if (alive) setRunCost(null) })
+    return () => { alive = false }
+  }, [lastAssistant?.runId])
+
   return (
     <div className="grid" style={{ gap: 16 }}>
       {confirmEl}
@@ -330,24 +422,42 @@ export default function Chat() {
             <Button onClick={newSession} disabled={busy}>+ 新会话</Button>
           </div>
           <div className="chat-side-note small muted">会话会自动保留上下文，删除后无法恢复。</div>
+          <input
+            className="chat-session-search"
+            value={sessionQuery}
+            onChange={(e) => setSessionQuery(e.target.value)}
+            placeholder="搜索会话…"
+            aria-label="搜索会话"
+          />
           <div className="chat-session-list">
-            {sessions.length === 0 ? (
-              <div className="chat-session-empty">
-                <span className="small muted">暂无历史会话</span>
-                <span className="small muted">先发一句，系统会自动创建会话并保留上下文。</span>
-              </div>
-            ) : (
-              sessions.map((s) => (
+            {(() => {
+              const q = sessionQuery.trim().toLowerCase()
+              const visible = sessions
+                .filter((s) => !q || `${s.title} ${s.last_content}`.toLowerCase().includes(q))
+                .sort((a, b) => Number(pinnedSids.includes(b.id)) - Number(pinnedSids.includes(a.id)))
+              if (visible.length === 0) {
+                return (
+                  <div className="chat-session-empty">
+                    <span className="small muted">{sessions.length === 0 ? '暂无历史会话' : '没有匹配的会话'}</span>
+                    <span className="small muted">
+                      {sessions.length === 0 ? '先发一句，系统会自动创建会话并保留上下文。' : '换个关键词试试，或新建会话。'}
+                    </span>
+                  </div>
+                )
+              }
+              return visible.map((s) => (
                 <SessionItemView
                   key={s.id}
                   s={s}
                   active={s.id === currentSid}
+                  pinned={pinnedSids.includes(s.id)}
                   onOpen={() => openSession(s.id)}
                   onRename={() => renameSession(s.id)}
                   onDelete={() => deleteSession(s.id)}
+                  onTogglePin={() => togglePin(s.id)}
                 />
               ))
-            )}
+            })()}
           </div>
         </aside>
 
@@ -360,7 +470,7 @@ export default function Chat() {
             </div>
           </div>
 
-          <div className="chat-stream">
+          <div className="chat-stream" ref={streamRef} onScroll={handleStreamScroll}>
             {messages.length === 0 ? (
               <div className="chat-empty">
                 <div className="chat-empty-title">先从一个问题开始</div>
@@ -389,12 +499,26 @@ export default function Chat() {
                   onToggleCitations={toggleCitations}
                   onRegenerate={regenerate}
                   onRetry={() => retryMessage(m)}
+                  onContinue={() => continueMessage(m)}
+                  onFeedback={(fb) => feedbackMessage(m, fb)}
                   onDeleteMessage={deleteMessage}
                 />
               ))
             )}
-            <div ref={endRef} />
           </div>
+
+          {showJumpBottom && (
+            <button type="button" className="chat-jump-bottom" onClick={jumpToBottom}>
+              回到底部
+            </button>
+          )}
+
+          {uploadErr && (
+            <div className="chat-input-error">
+              <ErrorBox message={uploadErr} />
+              <button type="button" className="chat-input-error-close" onClick={() => setUploadErr('')} aria-label="关闭">×</button>
+            </div>
+          )}
 
           <form className="chat-input" onSubmit={send}>
             <div className="chat-input-box">
@@ -489,17 +613,34 @@ export default function Chat() {
                   )}
                 </div>
               </div>
+              <div className="chat-inspect-block" style={{ gap: 4 }}>
+                <div className="chat-inspect-label">Token / 成本</div>
+                <div className="chat-inspect-line">
+                  {runCost
+                    ? `${(runCost.tokens_in + runCost.tokens_out).toLocaleString()} tok · $${runCost.estimated_cost.toFixed(4)}`
+                    : <span className="muted">—</span>}
+                </div>
+              </div>
             </div>
           )}
 
           {lastDocs.length > 0 && (
             <div className="chat-inspect-block">
-              <div className="chat-inspect-label">引用来源</div>
+              <div className="chat-inspect-label">引用来源（{lastDocs.length}）</div>
               <div className="chat-tools">
-                {lastDocs.map((d) => (
+                {(expandRefs ? lastDocs : lastDocs.slice(0, 6)).map((d) => (
                   <Link key={d} className="chat-tool" to="/knowledge">{d}</Link>
                 ))}
               </div>
+              {lastDocs.length > 6 && (
+                <a
+                  className="link"
+                  style={{ marginTop: 6, fontSize: 12 }}
+                  onClick={() => setExpandRefs((v) => !v)}
+                >
+                  {expandRefs ? '收起' : `展开全部 ${lastDocs.length} 篇`}
+                </a>
+              )}
             </div>
           )}
 
@@ -530,14 +671,6 @@ export default function Chat() {
         </Modal>
       )}
 
-      {uploadErr && (
-        <Modal title="提示" onClose={() => setUploadErr('')}>
-          <p className="small" style={{ margin: '0 0 16px' }}>{uploadErr}</p>
-          <div className="row">
-            <Button tone="primary" onClick={() => setUploadErr('')}>知道了</Button>
-          </div>
-        </Modal>
-      )}
     </div>
   )
 }

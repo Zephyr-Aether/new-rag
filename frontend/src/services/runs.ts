@@ -46,7 +46,12 @@ export const runsApi = {
         for (const chunk of parts) {
           const line = chunk.split('\n').find((l) => l.startsWith('data: '))
           if (!line) continue
-          const data = JSON.parse(line.slice(6)) as StreamEvent
+          let data: StreamEvent
+          try {
+            data = JSON.parse(line.slice(6)) as StreamEvent
+          } catch {
+            continue // 忽略脏数据行，不让单条坏 JSON 中断整条流
+          }
           onEvent(data)
           if (data.type === 'done') {
             runId = data.run_id

@@ -6,6 +6,8 @@ export const miscApi = {
   costOverview: () => get<{ rows: CostRow[] }>('/cost/overview'),
   costGrowth: () => get<{ rows: GrowthRow[] }>('/cost/growth'),
   costUsage: (days = 30) => get<{ rows: { tenant_id: string; day: string; runs: number; tokens: number; cost: number }[]; days: number }>(`/cost/usage?days=${days}`),
+  costQuotas: () =>
+    get<{ tenant_id: string; quotas: { key: string; label: string; used: number; limit: number | null; percent: number | null; over: boolean }[] }>('/cost/quotas'),
   reconcile: () => post<{ reconciled: number; runs_updated: number; total_estimated: number; total_actual: number; diff: number }>('/cost/reconcile'),
 // 权限策略（§6.2 AOP）
   policies: () =>

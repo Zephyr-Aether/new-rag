@@ -7,9 +7,9 @@
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
-from app.storage.models import AgentRunRow, LLMCallRow
+from app.storage.models import AgentRow, AgentRunRow, LLMCallRow, UserRow
 
 
 def _now() -> datetime:
@@ -61,6 +61,58 @@ class CostService:
         async with self.sessions() as s:
             rows = await s.execute(text(sql), params)
             return [dict(r._mapping) for r in rows]
+
+    async def quotas(self, *, tenant_id: str) -> list[dict]:
+        """Phase 1 配额可视化（§66）：当前租户用量 vs 配置上限（超限前可见）。"""
+        async with self.sessions() as s:
+            user_count = await s.scalar(
+                select(func.count(UserRow.id)).where(
+                    UserRow.tenant_id == tenant_id, UserRow.isDelete == False  # noqa: E712
+                )
+            )
+            agent_count = await s.scalar(
+                select(func.count(AgentRow.id)).where(AgentRow.tenant_id == tenant_id)
+            )
+            since = _now() - timedelta(days=30)
+            runs30 = await s.scalar(
+                select(func.count(AgentRunRow.run_id)).where(
+                    AgentRunRow.tenant_id == tenant_id, AgentRunRow.started_at >= since
+                )
+            )
+            tokens30 = await s.scalar(
+                select(func.coalesce(func.sum(AgentRunRow.tokens_in + AgentRunRow.tokens_out), 0)).where(
+                    AgentRunRow.tenant_id == tenant_id, AgentRunRow.started_at >= since
+                )
+            )
+            active_states = {"PLANNING", "RUNNING", "WAITING_TOOL", "WAITING_APPROVAL"}
+            concurrent = await s.scalar(
+                select(func.count(AgentRunRow.run_id)).where(
+                    AgentRunRow.tenant_id == tenant_id, AgentRunRow.state.in_(active_states)
+                )
+            )
+        settings = self.settings
+        limits = {
+            "users": getattr(settings, "tenant_max_users", 100),
+            "agents": getattr(settings, "tenant_max_agents", 50),
+            "concurrent_runs": getattr(settings, "tenant_max_concurrent_runs", 20),
+            "runs_30d": getattr(settings, "tenant_max_runs_30d", 100_000),
+        }
+        items = [
+            {"key": "users", "label": "用户数", "used": user_count or 0, "limit": limits["users"]},
+            {"key": "agents", "label": "Agent 数", "used": agent_count or 0, "limit": limits["agents"]},
+            {
+                "key": "concurrent_runs",
+                "label": "并发运行",
+                "used": concurrent or 0,
+                "limit": limits["concurrent_runs"],
+            },
+            {"key": "runs_30d", "label": "近 30 天运行", "used": runs30 or 0, "limit": limits["runs_30d"]},
+            {"key": "tokens_30d", "label": "近 30 天 Token", "used": int(tokens30 or 0), "limit": None},
+        ]
+        for it in items:
+            it["percent"] = round((it["used"] / it["limit"]) * 100, 1) if it["limit"] else None
+            it["over"] = bool(it["limit"] and it["used"] >= it["limit"])
+        return items
 
     async def reconcile(
         self,

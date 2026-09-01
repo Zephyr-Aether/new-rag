@@ -45,6 +45,17 @@ async def cost_growth(request: Request) -> dict:
     return {"rows": await state.cost_service.growth()}
 
 
+@router.get("/quotas")
+async def cost_quotas(
+    request: Request,
+    subject: Annotated[Subject, Depends(get_subject)],
+) -> dict:
+    """Phase 1 配额可视化（§66）：当前租户用量 vs 配置上限（超限前可见）。"""
+    state: AppState = request.app.state.agent
+    quotas = await state.cost_service.quotas(tenant_id=subject.tenant_id)
+    return {"tenant_id": subject.tenant_id, "quotas": quotas}
+
+
 @router.get("/usage")
 async def cost_usage(
     request: Request,
