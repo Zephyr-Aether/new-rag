@@ -10,6 +10,7 @@ import ContractModal from '../ContractModal'
 import RegressionModal from '../RegressionModal'
 import CanaryModal from '../CanaryModal'
 import ReleaseWizard from '../ReleaseWizard'
+import VersionDiff from '../VersionDiff'
 import { toast } from '@/toast'
 
 const NEXT_ACTION: Record<string, string> = {
@@ -149,6 +150,10 @@ export default function FlowWorkspace({ agentId }: { agentId: string }) {
           onRollback={(v) => confirm('回滚版本', `确定回滚 v${v} 吗？当前版本将停止、流量切到目标版本。`, () => act(`rb-${v}`, () => api.rollback(agentId, v), `已回滚到 v${v}`), { danger: true, confirmText: '回滚' })}
           onHalt={(v) => confirm('停用灰度', `确定停用 v${v} 灰度吗？新流量将回落 ACTIVE 版本。`, () => act(`halt-${v}`, () => api.halt(agentId, v), `v${v} 已停用`), { danger: true, confirmText: '停用灰度' })}
         />
+      )}
+
+      {orderedVersions !== null && orderedVersions.length > 0 && (
+        <VersionDiff versions={orderedVersions} />
       )}
 
       <details className="release-details">

@@ -67,6 +67,11 @@ export default function ReleaseWizard({
     }
   }
 
+  // 发布完成后的"下一步建议"：进入灰度监控或历史
+  const nextAfterPublish = version === ''
+    ? null
+    : `v${version} 已进入 ${stateLabel(String(versions.find((x) => x.version === version)?.status ?? ''))}。下一步：到发布页看灰度指标 —— 如果指标恶化，从这里一键回滚。`
+
   async function doGray() {
     if (version === '') return
     setBusy(true)
@@ -132,11 +137,13 @@ export default function ReleaseWizard({
               )}
               {contractBlocked && (
                 <div className="mt">
-                  <ErrorBox message="存在阻断项（fail）——勾选下方可强制继续" />
+                  <ErrorBox message="存在阻断项（fail），发布被门禁拦截" />
+                  <div className="small muted mt">建议先修复：{contract.checks.filter((c) => c.status === 'fail').map((c) => c.id).join('、') || '阻断项'}，再重新检查。</div>
                   <label className="field row" style={{ marginTop: 8 }}>
                     <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-                    <span>强制发布（跳过门禁）</span>
+                    <span>{force ? '✓ 我已确认风险，仍要继续' : '我已确认风险，仍要继续'}</span>
                   </label>
+                  {force && <p className="small muted">强制发布会跳过本次门禁，并在审计中记录你的选择。确认无误后点「下一步」。</p>}
                 </div>
               )}
             </div>
@@ -156,10 +163,11 @@ export default function ReleaseWizard({
               )}
               {regressionFailed && (
                 <div className="mt">
-                  <ErrorBox message="质量回退（regressed）——勾选下方可强制继续" />
+                  <ErrorBox message="回归未通过：质量回退，发布被拦截" />
+                  <div className="small muted mt">建议先检查退化案例，再重新运行回归；如确认是误判，可在人工确认后继续。</div>
                   <label className="field row" style={{ marginTop: 8 }}>
                     <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-                    <span>强制发布（跳过回归门禁）</span>
+                    <span>{force ? '✓ 我已确认回归误判，仍要继续' : '我已确认回归误判，仍要继续'}</span>
                   </label>
                 </div>
               )}
@@ -177,11 +185,37 @@ export default function ReleaseWizard({
             </div>
           )}
 
+          {/* 发布完成反馈：下一步去观察结果 / 看历史 */}
+          {publishMsg && nextAfterPublish && (
+            <div className="mt">
+              <p className="small">{nextAfterPublish}</p>
+              <div className="row mt" style={{ gap: 8 }}>
+                <Button onClick={onDone}>回到发布页看指标</Button>
+              </div>
+            </div>
+          )}
+
           {step === 3 && (
             <div>
               <Field label="灰度百分比（0-100）">
                 <input type="number" min={0} max={100} value={pct} onChange={(e) => setPct(e.target.value)} />
               </Field>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {['1', '5', '10', '25'].map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`tmp-card${pct === p ? ' on' : ''}`}
+                    style={{ padding: '4px 10px', width: 'auto' }}
+                    onClick={() => setPct(p)}
+                  >
+                    {p}%
+                  </button>
+                ))}
+              </div>
+              <p className="small muted mt">
+                {Number(pct) <= 1 ? '保守灰度：先给极少量流量验证。' : Number(pct) <= 10 ? '常规灰度：可控范围内验证。' : '偏激进：接近全量，请确认 Canary 指标健康。'}
+              </p>
               <div className="row">
                 <Button tone="primary" disabled={busy} onClick={doGray}>
                   {busy ? '灰度中…' : '灰度放量并完成'}

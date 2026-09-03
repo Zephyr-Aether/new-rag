@@ -77,6 +77,13 @@ export default function Policies() {
   // 角色
   const [newRole, setNewRole] = useState('')
   const [assign, setAssign] = useState<{ roleId: string; user: string } | null>(null)
+  // 角色模板（Phase 1：预设角色一键创建）
+  const [templates, setTemplates] = useState<{ key: string; name: string; description: string }[]>([])
+  const [tpl, setTpl] = useState('')
+  const [tplBusy, setTplBusy] = useState(false)
+  useEffect(() => {
+    api.roleTemplates().then((r) => setTemplates(r.templates)).catch(() => undefined)
+  }, [])
   // 策略表单下拉数据（/policies/meta）
   const actions = data?.[2].actions ?? []
   const resources = data?.[2].resources ?? []
@@ -174,6 +181,21 @@ export default function Policies() {
       refresh()
     } catch (e) {
       toast((e as Error).message, 'err')
+    }
+  }
+
+  async function createRoleFromTemplate() {
+    if (!tpl) return
+    setTplBusy(true)
+    try {
+      const r = await api.roleCreateFromTemplate(tpl)
+      toast(r.created ? `已从模板创建角色「${r.name}」` : `角色「${r.name}」已存在`)
+      setTpl('')
+      refresh()
+    } catch (e) {
+      toast((e as Error).message, 'err')
+    } finally {
+      setTplBusy(false)
     }
   }
 
@@ -421,6 +443,23 @@ export default function Policies() {
             <input value={newRole} onChange={(e) => setNewRole(e.target.value)} placeholder="新角色名" style={{ maxWidth: 180 }} />
             <Button disabled={!newRole.trim() || !can('policy:manage')} onClick={createRole}>新建角色</Button>
             <Button disabled={!can('policy:manage')} onClick={openRoleEdit}>编辑角色</Button>
+            {templates.length > 0 && (
+              <span className="row" style={{ gap: 4, marginLeft: 8 }}>
+                <Select value={tpl || undefined} onValueChange={setTpl}>
+                  <SelectTrigger className="w-auto" style={{ minWidth: 120 }}>
+                    <SelectValue placeholder="从模板创建…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((t) => (
+                      <SelectItem key={t.key} value={t.key}>{t.name} — {t.description}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button disabled={!tpl || tplBusy || !can('policy:manage')} onClick={createRoleFromTemplate}>
+                  {tplBusy ? '创建中…' : '创建'}
+                </Button>
+              </span>
+            )}
           </div>
           {roles.length === 0 ? (
             <Empty text="还没有角色" />

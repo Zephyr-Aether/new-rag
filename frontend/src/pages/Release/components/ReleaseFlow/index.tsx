@@ -329,6 +329,35 @@ export default function ReleaseFlow({
       }
     : null
 
+  // —— 门禁摘要（P0：先给总结果，再给证据与建议动作） ——
+  const gateSummary = (() => {
+    if (!contractFor && !regFor) return null
+    if (contractFor?.data.blocked) {
+      return {
+        verdict: 'block',
+        title: '契约检查未通过',
+        body: `共 ${contractSummary!.total} 项：通过 ${contractSummary!.passed}，阻断 ${contractSummary!.blocked}`,
+        advice: `建议先修复：${contractSummary!.fails.map((c) => c.id).join('、')}，再重新运行契约检查。`,
+      }
+    }
+    if (regFor?.data.regressed) {
+      const rate = (regFor.data.pass_rate ?? 0) * 100
+      const base = regFor.data.previous_pass_rate == null ? null : (regFor.data.previous_pass_rate * 100).toFixed(0)
+      return {
+        verdict: 'warn',
+        title: '回归评测退化',
+        body: `通过率 ${rate.toFixed(0)}%${base != null ? `（基线 ${base}%）` : '（无基线）'}`,
+        advice: '建议返回草稿检查退化案例（补 prompt / 补评测集），通过后再放量。',
+      }
+    }
+    return {
+      verdict: 'pass',
+      title: '门禁已通过',
+      body: '契约检查与回归评测均通过，可以进入灰度放量。',
+      advice: '下一步：开始灰度，用小流量验证真实指标。',
+    }
+  })()
+
   return (
     <div className="grid" style={{ gap: 16 }}>
       {confirmEl}
@@ -377,6 +406,20 @@ export default function ReleaseFlow({
           <div className="release-complete-banner">该发布流程已全部完成。如需开启新变更，请在「创建草稿」步填好表单后点「下一步」。</div>
         )}
       </Card>
+
+      {/* 门禁总结果卡（先给结论，再给证据） */}
+      {gateSummary && (
+        <Card className={`release-gate release-gate-${gateSummary.verdict}`}>
+          <div className="release-gate-head">
+            <span className={`release-gate-verdict ${gateSummary.verdict}`}>
+              {gateSummary.verdict === 'pass' ? '✓' : gateSummary.verdict === 'block' ? '✗' : '⚠'}
+            </span>
+            <span className="release-gate-title">{gateSummary.title}</span>
+          </div>
+          <div className="release-gate-body">{gateSummary.body}</div>
+          <div className="release-gate-advice small">{gateSummary.advice}</div>
+        </Card>
+      )}
 
       {/* 横向步骤条（antd Steps） */}
       <Steps

@@ -33,4 +33,5 @@ export interface SessionItem {
   status: string
   message_count: number
   last_content: string
+  created_at?: string
 }

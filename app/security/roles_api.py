@@ -38,6 +38,138 @@ class RoleUpdateRequest(BaseModel):
     description: str | None = None
 
 
+class RoleTemplateRequest(BaseModel):
+    template: str
+
+
+# Phase 1 角色模板（§67）：预设角色 + 默认策略集，管理员一键创建（客户不必从零配 RBAC）
+ROLE_TEMPLATES: dict[str, dict] = {
+    "admin": {
+        "name": "管理员",
+        "description": "平台管理员：用户/策略/配置/队列等全部治理能力",
+        "policies": [
+            ("agent:use", "*"),
+            ("run:create", "*"),
+            ("tool:execute", "calc.add"),
+            ("tool:execute", "echo"),
+            ("tool:execute", "kb.search"),
+            ("tool:execute", "graph.query"),
+            ("model:configure", "*"),
+            ("data:purge", "*"),
+            ("release:publish", "*"),
+            ("policy:manage", "*"),
+            ("config:write", "*"),
+            ("flags:write", "*"),
+            ("cost:reconcile", "*"),
+            ("release:ops", "*"),
+            ("release:version:create", "*"),
+            ("queue:ops", "*"),
+            ("kb:ingest", "*"),
+            ("memory:write", "*"),
+            ("eval:write", "*"),
+            ("graph:write", "*"),
+        ],
+    },
+    "operator": {
+        "name": "运维",
+        "description": "日常运维：导入知识、运行对话、发布与队列治理",
+        "policies": [
+            ("agent:use", "*"),
+            ("run:create", "*"),
+            ("tool:execute", "calc.add"),
+            ("tool:execute", "echo"),
+            ("tool:execute", "kb.search"),
+            ("tool:execute", "graph.query"),
+            ("kb:ingest", "*"),
+            ("memory:write", "*"),
+            ("release:ops", "*"),
+            ("release:version:create", "*"),
+            ("queue:ops", "*"),
+        ],
+    },
+    "reviewer": {
+        "name": "评审",
+        "description": "质检与评审：运行对话验证、评测写入、引用检索（无治理写权限）",
+        "policies": [
+            ("agent:use", "*"),
+            ("run:create", "*"),
+            ("tool:execute", "calc.add"),
+            ("tool:execute", "kb.search"),
+            ("tool:execute", "graph.query"),
+            ("eval:write", "*"),
+            ("graph:write", "*"),
+        ],
+    },
+    "viewer": {
+        "name": "访客",
+        "description": "只读使用：运行对话、检索知识（无任何治理/写权限）",
+        "policies": [
+            ("agent:use", "*"),
+            ("run:create", "*"),
+            ("tool:execute", "kb.search"),
+            ("tool:execute", "graph.query"),
+        ],
+    },
+}
+
+
+@router.get("/templates")
+async def list_role_templates(
+    request: Request,
+    subject: Annotated[Subject, Depends(require_perm("policy:manage", "*"))],
+) -> dict:
+    """Phase 1 角色模板列表（§67）：预设角色定义，供「从模板创建」。"""
+    return {
+        "templates": [
+            {"key": k, "name": t["name"], "description": t["description"]} for k, t in ROLE_TEMPLATES.items()
+        ]
+    }
+
+
+@router.post("/templates")
+async def create_role_from_template(
+    body: RoleTemplateRequest,
+    request: Request,
+    subject: Annotated[Subject, Depends(require_perm("policy:manage", "*"))],
+) -> dict:
+    """Phase 1 从模板创建角色（§67）：建角色 + 默认策略集，幂等（同名已存在则返回已存在）。"""
+    state: AppState = request.app.state.agent
+    tpl = ROLE_TEMPLATES.get(body.template)
+    if tpl is None:
+        raise AgentError(f"unknown role template: {body.template}", code="BAD_REQUEST")
+    role_id = f"role-{uuid.uuid4().hex[:10]}"
+    async with state.sessions() as s:
+        existing = await s.scalar(
+            select(RoleRow).where(
+                RoleRow.tenant_id == subject.tenant_id, RoleRow.name == tpl["name"]
+            )
+        )
+        if existing is not None:
+            return {"id": existing.id, "name": existing.name, "created": False}
+        s.add(
+            RoleRow(
+                id=role_id,
+                tenant_id=subject.tenant_id,
+                name=tpl["name"],
+                description=tpl["description"],
+            )
+        )
+        for action, resource in tpl["policies"]:
+            s.add(
+                PolicyRow(
+                    id=f"pol-{uuid.uuid4().hex[:10]}",
+                    tenant_id=subject.tenant_id,
+                    role_id=role_id,
+                    name=f"template-{body.template}",
+                    effect="ALLOW",
+                    action=action,
+                    resource=resource,
+                )
+            )
+        await s.commit()
+    return {"id": role_id, "name": tpl["name"], "created": True}
+
+
 @router.get("")
 async def list_roles(
     request: Request,

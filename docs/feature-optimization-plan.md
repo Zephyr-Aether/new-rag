@@ -19,7 +19,7 @@
 
 | 模块 | 当前状态 | 主要问题 | 优化方向 | 优先级 |
 |---|---|---|---|---|
-| 登录 / 身份 | 已有 JWT / OIDC 钩子 / 用户管理基础 | 首次使用仍有理解成本 | 首次登录向导、邀请用户、角色模板、SSO 配置助手 | P0 |
+| 登录 / 身份 | 已有 JWT / OIDC 钩子 / 用户管理基础 | 首次使用仍有理解成本 | 首次登录向导、邀请用户、角色模板、SSO 配置助手（详见 [Onboarding Wizard 优化方案](./onboarding-wizard-optimization-plan.md)） | P0 |
 | 租户 / 权限 | RBAC 已存在 | 权限边界对普通管理员不够友好 | 权限说明、角色模板、资源级提示、越权错误可读化 | P0 |
 | 对话 / Run | 有会话、流式、引用、重试 | 结果对比和回放还不够“分析型” | 会话搜索、Run Compare、引用聚合、失败定位卡片 | P0 |
 | 知识库 | 能入库、检索、引用 | 上传后“是否生效”反馈不足 | 索引状态、chunk 预览、召回调参、增量更新、去重提示 | P0 |
@@ -39,6 +39,8 @@
 ### 3.1 路径 A：首次进入平台
 
 **目标**：把“第一次成功”变快。
+
+> 详细拆解见：[Onboarding Wizard 优化方案](./onboarding-wizard-optimization-plan.md)。
 
 | 问题 | 现象 | 优化方案 | 验收标准 |
 |---|---|---|---|
@@ -148,11 +150,13 @@
 
 ### 4.5 Release
 
+> 详细拆解见：[发布页面优化方案](./release-page-optimization-plan.md)。
+
 **现状**：流程完整，但复杂度较高。
 
 **优化项**：
 
-- 发布向导：概览、差异、门禁、灰度、回滚五步
+- 发布向导（见 [发布页面优化方案](./release-page-optimization-plan.md)）：概览、差异、门禁、灰度、回滚五步
 - 发布摘要：本次改了什么、影响什么、风险在哪
 - Canary 结果图：错误率、延迟、成本、工具成功率、RAG Recall
 - 一键回到上一个稳定版本
@@ -272,7 +276,7 @@
 
 ### Sprint 1-2：主路径体验
 
-- Onboarding
+- Onboarding（见 [Onboarding Wizard 优化方案](./onboarding-wizard-optimization-plan.md)）
 - Dashboard 待办
 - Run Compare / Failure Summary
 - Knowledge 索引状态与命中解释

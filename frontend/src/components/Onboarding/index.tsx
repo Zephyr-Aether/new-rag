@@ -4,6 +4,7 @@ import { api, ModelConfig } from '../../services'
 import { Button, ErrorBox, Modal } from '../'
 
 const LS_KEY = 'agent_platform_onboarding'
+const LS_PROGRESS = 'agent_platform_onboarding_progress'
 
 export function isOnboardingDone(): boolean {
   return localStorage.getItem(LS_KEY) === '1'
@@ -13,12 +14,15 @@ export function markOnboardingDone(): void {
 }
 export function resetOnboarding(): void {
   localStorage.removeItem(LS_KEY)
+  localStorage.removeItem(LS_PROGRESS)
 }
 
 type Template = {
   id: string
   title: string
   desc: string
+  audience: string
+  outcome: string
   kbName: string
   docTitle: string
   docText: string
@@ -31,6 +35,8 @@ const TEMPLATES: Template[] = [
     id: 'support',
     title: '客服问答',
     desc: '退货、退款、售后等常见问题',
+    audience: '适合客服 / 售后 / 运营',
+    outcome: '一份可直接改用的客服知识库 + 一条验证问答',
     kbName: '客服问答（示例）',
     docTitle: '退货与退款政策',
     docText: '# 退货与退款政策\n\n退货条件：商品签收后 7 天内支持无理由退货，商品需保持未使用、包装完整。\n\n退款时效：退款申请审核通过后，资金将在 3-7 个工作日内原路退回。\n\n运费说明：因质量问题退货运费由商家承担；无理由退货运费由买家承担。\n\n换货流程：签收后 15 天内支持换货，联系客服登记后寄回即可。',
@@ -40,6 +46,8 @@ const TEMPLATES: Template[] = [
     id: 'policy',
     title: '制度查询',
     desc: '请假、报销、考勤等内部制度',
+    audience: '适合 HR / 行政 / 全体员工',
+    outcome: '一份内部制度问答库 + 一条验证问答',
     kbName: '制度查询（示例）',
     docTitle: '员工请假制度',
     docText: '# 员工请假制度\n\n休假类型：年假、事假、病假、婚假、产假。\n\n申请规则：请假需提前 1 天在系统提交申请；连续超过 3 天需部门负责人审批。\n\n销假流程：假期结束当日需在系统确认销假，未销假将按旷工处理。\n\n年假说明：入职满一年后享有 5 天带薪年假，未使用可顺延至次年一季度。',
@@ -49,6 +57,8 @@ const TEMPLATES: Template[] = [
     id: 'product',
     title: '产品资料助手',
     desc: '产品规格、保修、部署信息',
+    audience: '适合售前 / 产品 / 交付实施',
+    outcome: '一份产品知识库 + 一条验证问答',
     kbName: '产品资料（示例）',
     docTitle: '产品规格说明',
     docText: '# 智能客服机器人产品说明\n\n产品定位：面向企业的知识问答 Agent，支持接入企业文档构建专属知识库。\n\n核心能力：多轮对话、文档检索引用、工具调用、效果评测与版本发布。\n\n部署方式：支持 Docker 一键部署，模型可对接 OpenAI 兼容网关。\n\n服务保障：企业版提供 SLA 99.9% 与 7×24 技术支持，保修期 12 个月。',
@@ -58,6 +68,8 @@ const TEMPLATES: Template[] = [
     id: 'ticket',
     title: '工单辅助处理',
     desc: '工单分级、SLA、流转与超时',
+    audience: '适合技术支持 / 运维',
+    outcome: '一份工单 FAQ 库 + 一条验证问答',
     kbName: '工单 FAQ（示例）',
     docTitle: '工单处理规范',
     docText: '# 工单处理规范\n\nSLA 目标：普通工单 4 小时内响应，紧急工单 30 分钟内响应。\n\n超时处理：触发 SLA 后自动升级一级支持，并追加告警通知负责人。\n\n流转规则：工单按「受理→分派→处理→验收→关闭」五环节流转。\n\n知识沉淀：处理完成的高价值方案会回流到知识库，供后续工单直接引用。',
@@ -86,15 +98,36 @@ export default function Onboarding({ open, onClose }: { open: boolean; onClose: 
 
   useEffect(() => {
     if (!open) return
-    setStep(0)
-    setTemplate(null)
-    setDemoDone(false)
     setErr('')
+    // 断点续做：上次做到哪一步，回到哪一步（未完成时）
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_PROGRESS) ?? 'null') as
+        | { step?: number; template?: string; demoDone?: boolean }
+        | null
+      setStep(Math.min(saved?.step ?? 0, STEP_TITLES.length - 1))
+      setTemplate(TEMPLATES.find((t) => t.id === saved?.template) ?? null)
+      setDemoDone(!!saved?.demoDone)
+    } catch {
+      setStep(0)
+      setTemplate(null)
+      setDemoDone(false)
+    }
     Promise.allSettled([api.modelConfig(), api.kbBases()]).then(([cfg, kb]) => {
       setCfg(cfg.status === 'fulfilled' ? cfg.value : null)
       setKbCount(kb.status === 'fulfilled' ? kb.value.bases.length : 0)
     })
   }, [open])
+
+  // 步骤推进时记录进度，支持中断后从断点继续
+  useEffect(() => {
+    if (!open) return
+    try {
+      localStorage.setItem(
+        LS_PROGRESS,
+        JSON.stringify({ step, template: template?.id, demoDone }),
+      )
+    } catch { /* 忽略存储异常 */ }
+  }, [open, step, template, demoDone])
 
   function go(path: string) {
     markOnboardingDone()
@@ -189,9 +222,10 @@ export default function Onboarding({ open, onClose }: { open: boolean; onClose: 
                   className={`tmp-card${template?.id === t.id ? ' on' : ''}`}
                   onClick={() => setTemplate(t)}
                 >
-                  <div className="tmp-title">{t.title}</div>
+                  <div className="tmp-title">{t.title}{t.id === 'support' && <span className="tmp-badge">推荐</span>}</div>
                   <div className="tmp-desc">{t.desc}</div>
-                  <div className="tmp-q small muted">示例提问：{t.question}</div>
+                  <div className="tmp-audience small">{t.audience}</div>
+                  <div className="tmp-q small muted">完成后：{t.outcome}</div>
                 </button>
               ))}
             </div>
@@ -229,11 +263,22 @@ export default function Onboarding({ open, onClose }: { open: boolean; onClose: 
             {demoDone ? (
               <p style={{ color: '#16a34a' }}>✓ 示例已就绪，Agent 现在可以检索这份知识回答问题。</p>
             ) : (
-              <div className="mt row">
-                <Button tone="primary" disabled={busy} onClick={createDemo}>
-                  {busy ? '创建中…' : '一键创建示例库并导入'}
-                </Button>
-              </div>
+              <>
+                {kbCount > 0 && (
+                  <div className="empty mb" style={{ textAlign: 'left' }}>
+                    <p className="muted">你已经有一个知识库了——可以直接复用它验证，不必再造一份示例。</p>
+                  </div>
+                )}
+                <div className="mt row">
+                  <Button tone="primary" disabled={busy} onClick={createDemo}>
+                    {busy ? '创建中…' : kbCount > 0 ? '也创建示例库' : '一键创建示例库并导入'}
+                  </Button>
+                  {kbCount > 0 && <Button onClick={() => setStep(3)}>用已有知识库，跳过导入</Button>}
+                </div>
+              </>
+            )}
+            {kbCount > 0 && !demoDone && (
+              <p className="small muted mt">跳过导入后，第 4 步会直接用你现有的知识库来问答。</p>
             )}
           </div>
         )}
@@ -254,12 +299,17 @@ export default function Onboarding({ open, onClose }: { open: boolean; onClose: 
         )}
         {step === 4 && (
           <div>
-            <p>
-              答案靠谱后，就能进入发布与治理：先过契约检查与效果评测，再灰度放量，看指标决定继续还是回滚。
+            <p style={{ marginTop: 0 }}>
+              你已经把第一次价值跑通了：{template ? `示例知识库「${template.kbName}」已入库并检索通过，也运行了一条验证问答` : '示例知识、一条验证问答'}。
+              接下来可以进入发布与治理：先过契约检查与效果评测，再灰度放量，看指标决定继续还是回滚。
             </p>
-            <div className="mt row">
+            <div className="mt row" style={{ gap: 8 }}>
               <Button tone="primary" onClick={() => go('/release')}>去发布第一个版本</Button>
+              <Button onClick={() => go('/chat')}>进入工作台</Button>
             </div>
+            <p className="small muted mt">
+              想再看一遍引导，随时到「配置中心 → 右上角 · 重新体验引导」重新打开。
+            </p>
           </div>
         )}
         {err && <div className="mt"><ErrorBox message={err} /></div>}

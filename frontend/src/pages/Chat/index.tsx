@@ -41,6 +41,14 @@ export default function Chat() {
   // 滚动跟随：贴底才自动滚，用户上翻时停止跟随并显示「回到底部」
   const [stickToBottom, setStickToBottom] = useState(true)
   const [showJumpBottom, setShowJumpBottom] = useState(false)
+  // 右侧验证面板：默认展开，可收起给主消息区让出空间（本地记忆）
+  const [inspectOpen, setInspectOpen] = useState(() => localStorage.getItem('chat.inspect') !== '0')
+  const toggleInspect = useCallback(() => {
+    setInspectOpen((v) => {
+      localStorage.setItem('chat.inspect', v ? '0' : '1')
+      return !v
+    })
+  }, [])
   // 会话搜索 + 置顶（置顶本地持久化）
   const [sessionQuery, setSessionQuery] = useState('')
   const [pinnedSids, setPinnedSids] = useState<string[]>(() => {
@@ -407,7 +415,7 @@ export default function Chat() {
         }
       />
 
-      <div className="home-hint">
+      <div className="home-hint chat-hint">
         <div className="home-hint-copy">
           <span className="home-hint-kicker">对话验证 · 这一步</span>
           <span>1. 先点一个示例问题 2. 需要资料就上传文档 3. 答不稳就去知识库补资料。</span>
@@ -567,8 +575,12 @@ export default function Chat() {
           </form>
         </div>
 
-        <aside className="chat-inspect">
-          <div className="chat-inspect-title">本次回答 · 验证信息</div>
+        {inspectOpen ? (
+          <aside className="chat-inspect">
+            <div className="chat-inspect-head">
+              <span className="chat-inspect-title">本次回答 · 验证信息</span>
+              <button type="button" className="chat-inspect-toggle" onClick={toggleInspect} title="收起验证面板" aria-label="收起验证面板">›</button>
+            </div>
 
           <div className="chat-inspect-block">
             <div className="chat-inspect-label">当前知识</div>
@@ -656,7 +668,10 @@ export default function Chat() {
               </div>
             </div>
           )}
-        </aside>
+          </aside>
+        ) : (
+          <button type="button" className="chat-inspect-collapsed" onClick={toggleInspect} title="展开验证面板" aria-label="展开验证面板">‹</button>
+        )}
       </div>
 
       {renameSid && (

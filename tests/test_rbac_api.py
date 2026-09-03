@@ -75,3 +75,58 @@ def test_role_update_blank_name_400_and_missing_404():
         rid = c.post("/roles", json={"name": "ops"}).json()["id"]
         assert c.put(f"/roles/{rid}", json={"name": "  "}).status_code == 400
         assert c.put("/roles/role-missing", json={"name": "x"}).status_code == 404
+
+
+def test_role_templates_list_and_create():
+    tenant = f"t-{uuid.uuid4().hex[:8]}"
+    with _make_client(tenant) as c:
+        tpl = c.get("/roles/templates").json()["templates"]
+        keys = {t["key"] for t in tpl}
+        assert {"admin", "operator", "reviewer", "viewer"} <= keys
+        assert all(t["name"] and t["description"] for t in tpl)
+
+        # 从模板创建：建角色 + 策略集
+        r = c.post("/roles/templates", json={"template": "operator"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["created"] is True and body["name"] == "运维"
+        rid = body["id"]
+        policies = c.get("/policies").json()["policies"]
+        role_pols = [p for p in policies if p.get("role_id") == rid]
+        assert any(p["action"] == "kb:ingest" for p in role_pols)
+        assert any(p["action"] == "release:ops" for p in role_pols)
+        # 无 release:publish（operator 不该有发布权）
+        assert not any(p["action"] == "release:publish" for p in role_pols)
+
+        # 幂等：同名已存在则复用
+        again = c.post("/roles/templates", json={"template": "operator"}).json()
+        assert again["created"] is False and again["id"] == rid
+
+
+def test_role_template_unknown_400():
+    tenant = f"t-{uuid.uuid4().hex[:8]}"
+    with _make_client(tenant) as c:
+        assert c.post("/roles/templates", json={"template": "nope"}).status_code == 400
+
+
+def test_create_tenant_boots_admin_role_and_default_policies():
+    """Phase 1 租户生命周期：新建租户自动配默认管理员角色 + 默认策略（onboarding 一次到位）。"""
+    admin_tenant = f"t-{uuid.uuid4().hex[:8]}"
+    with _make_client(admin_tenant) as c:
+        tid = f"t-{uuid.uuid4().hex[:6]}"
+        admin_uid = f"u-{uuid.uuid4().hex[:6]}"
+        r = c.post(
+            "/tenants",
+            json={"tenant_id": tid, "name": "Onboard Co", "admin_user_id": admin_uid, "admin_password": "hashed"},
+        )
+        assert r.status_code == 200 and r.json()["ok"] is True
+
+    # 用新租户管理员的 token 查询（新租户自带 policy:manage，能过 require_perm）
+    token = create_access_token(get_settings(), tenant_id=tid, user_id=admin_uid)
+    with TestClient(create_app()) as c2:
+        c2.headers.update({"Authorization": f"Bearer {token}"})
+        roles = c2.get("/roles").json()["roles"]
+        assert any(x["name"] == "管理员" for x in roles)
+        pols = c2.get("/policies").json()["policies"]
+        assert any(p["action"] == "kb:ingest" and p["resource"] == "*" for p in pols)
+        assert any(p["action"] == "release:publish" for p in pols)

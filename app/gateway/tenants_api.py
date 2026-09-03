@@ -16,7 +16,7 @@ from app.common.errors import AgentError
 from app.gateway.deps import require_perm
 from app.gateway.passwords import hash_password
 from app.state import AppState
-from app.storage.models import PolicyRow, TenantRow, UserRow
+from app.storage.models import PolicyRow, RoleRow, TenantRow, UserRoleRow, UserRow
 from app.storage.seed import DEFAULT_POLICIES
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
@@ -52,6 +52,22 @@ async def create_tenant(
                 display_name=f"{body.name} Admin",
                 password_hash=hash_password(body.admin_password) if body.admin_password else None,
                 must_change_password=bool(body.admin_password),
+            )
+        )
+        # Phase 1 租户生命周期：默认管理员角色 + 绑定（与 seed_defaults 一致，避免新租户无角色）
+        admin_role = RoleRow(
+            id=f"role-{uuid.uuid4().hex[:10]}",
+            tenant_id=tenant_id,
+            name="管理员",
+            description="平台管理员：用户/策略/配置/队列等治理能力",
+        )
+        s.add(admin_role)
+        s.add(
+            UserRoleRow(
+                id=f"ur-{uuid.uuid4().hex[:10]}",
+                tenant_id=tenant_id,
+                user_id=body.admin_user_id,
+                role_id=admin_role.id,
             )
         )
         for action, resource in DEFAULT_POLICIES:

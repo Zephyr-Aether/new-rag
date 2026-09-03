@@ -49,6 +49,10 @@ export const authApi = {
     post<{ ok: boolean; role_id: string; user_id: string }>(`/roles/${encodeURIComponent(roleId)}/users`, { user_id: userId }),
   roleRemoveUser: (roleId: string, userId: string) =>
     del<{ ok: boolean }>(`/roles/${encodeURIComponent(roleId)}/users/${encodeURIComponent(userId)}`),
+  roleTemplates: () =>
+    get<{ templates: { key: string; name: string; description: string }[] }>('/roles/templates'),
+  roleCreateFromTemplate: (template: string) =>
+    post<{ id: string; name: string; created: boolean }>('/roles/templates', { template }),
   // 健康 / 元数据
   health: () => get<HealthHA>('/health/ha'),
   meta: () => get<Meta>('/meta'),
